@@ -8,10 +8,8 @@ import numpy as np
 
 def get_frames(vid_path: Path) -> Generator[tuple[np.ndarray, float], None, int]:
     """
-    Returns:
-        An iterator through the frames of the video
+    Yields (frame, timestamp_ms). Returns 0 at end, -1 if cannot open.
     """
-
     video = cv.VideoCapture(str(vid_path))
     if not video.isOpened():
         return -1
@@ -20,7 +18,6 @@ def get_frames(vid_path: Path) -> Generator[tuple[np.ndarray, float], None, int]
         ret, frame = video.read()
         if not ret:
             break
-
         timestamp = video.get(cv.CAP_PROP_POS_MSEC)
         yield frame, timestamp
 
@@ -29,11 +26,10 @@ def get_frames(vid_path: Path) -> Generator[tuple[np.ndarray, float], None, int]
 
 
 def get_frames_at_indices(vid_path: Path, indices: list[int]):
-    frames = [
-        frame
-        for i, (frame, _) in enumerate(get_frames(vid_path=vid_path))
-        if i in indices
-    ]
+    frames = []
+    for i, (frame, _) in enumerate(get_frames(vid_path=vid_path)):
+        if i in indices:
+            frames.append(frame)
     return frames
 
 
@@ -41,9 +37,8 @@ def save_frames(
     output_dir: Path, frames: list[np.ndarray], filenames: list[str]
 ) -> None:
     """
-    Saves the given frames in the given directory. Raises error if the given path does not exist, or exists but points to a file.
+    Saves the given frames in the given directory.
     """
-
     if not output_dir.exists():
         raise ValueError("Given path does not exist.")
     if output_dir.is_file():
@@ -51,6 +46,8 @@ def save_frames(
 
     cwd = Path.cwd()
     os.chdir(output_dir)
-    for frame, filename in zip(frames, filenames):
-        cv.imwrite(filename=filename, img=frame)
-    os.chdir(cwd)
+    try:
+        for frame, filename in zip(frames, filenames):
+            cv.imwrite(filename=filename, img=frame)
+    finally:
+        os.chdir(cwd)

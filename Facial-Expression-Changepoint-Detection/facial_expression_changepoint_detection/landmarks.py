@@ -30,23 +30,8 @@ _68_INDICES = [
     {61, 40, 37, 0, 267, 270, 91, 84, 17, 314, 321, 291},  # outer lips
     {78, 81, 13, 311, 178, 14, 402, 308},  # inner lips
     {
-        127,
-        234,
-        93,
-        132,
-        58,
-        172,
-        150,
-        176,
-        152,
-        400,
-        379,
-        397,
-        288,
-        361,
-        323,
-        454,
-        356,
+        127, 234, 93, 132, 58, 172, 150, 176, 152,
+        400, 379, 397, 288, 361, 323, 454, 356
     },  # jawline
 ]
 
@@ -56,41 +41,19 @@ _DEFAULT_INDICES = set().union(*_68_INDICES)
 def preprocess_for_mediapipe(
     frame: np.ndarray, timestamp: float
 ) -> tuple[mp.Image, int]:
-    """
-    Converts the frame and timestamp to the format Mediapipe expects.
-    The frame is conveted to RGB (opencv reads frames in BGR), and an mp.Image object is created from it.
-    The timestamp is rounded to an integer.
-
-    Returns:
-        The frame and timestamp in a format ready to be consumed by a Mediapipe landmarker
-    """
-
     rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
     mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
     return mp_img, round(timestamp)
 
 
 def new_landmarker() -> mp.tasks.vision.FaceLandmarker:
-    """
-    Convenience function that returns a new instance of the Mediapipe face landmarker
-    """
-
-    landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(
-        _MP_FACE_LANDMARKER_OPTIONS
-    )
-    return landmarker
+    return mp.tasks.vision.FaceLandmarker.create_from_options(_MP_FACE_LANDMARKER_OPTIONS)
 
 
 class LandmarksSignalExtractor:
     def __init__(self, indices: Optional[set[int]] = None):
-        """
-        Parameters:
-            indices:
-                The set of indices describing which of the Mediapipe face landmarker results
-                will be part of the return value of the get_facial_landmarks method
-        """
-
         self.landmarks_indices = indices if indices else _DEFAULT_INDICES
+        self._vec_len = 2 * len(self.landmarks_indices)  # x,y per landmark
 
     def get_facial_landmarks(
         self,
@@ -98,43 +61,49 @@ class LandmarksSignalExtractor:
         timestamp: float,
         face_landmarker: mp.tasks.vision.FaceLandmarker,
     ) -> np.ndarray:
-        """
-        Returns:
-            The facial landmarks (x and y coordinates), flattened to a 1D array
-
-        Each call with the same face landmarker must be passed a larger timestamp than the previous
-        """
-
         mp_img, ts = preprocess_for_mediapipe(frame, timestamp)
-
-        # call mediapipe model to get landmark coordinates
         mp_results = face_landmarker.detect_for_video(mp_img, ts)
 
+        # If no face detected, return NaNs for later fill
+        if not mp_results.face_landmarks:
+            return np.full((self._vec_len,), np.nan, dtype=float)
+
         facial_landmarks = mp_results.face_landmarks[0]
-        facial_landmarks = np.array(
-            [
-                [landmark_container.x, landmark_container.y]
-                for i, landmark_container in enumerate(facial_landmarks)
-                if i in self.landmarks_indices
-            ]
-        )
-        return facial_landmarks.ravel()
+        rows = []
+        for i, landmark_container in enumerate(facial_landmarks):
+            if i in self.landmarks_indices:
+                rows.append([landmark_container.x, landmark_container.y])
+        if not rows:
+            return np.full((self._vec_len,), np.nan, dtype=float)
+        arr = np.array(rows, dtype=float)
+        return arr.ravel()
 
     def extract_signal(self, vid_path: Path) -> np.ndarray:
-        """
-        Returns:
-            An n x m array, where n is the number of frames in the video and n is the number of landmark points
-        """
-
         with new_landmarker() as face_landmarker:
-            signal = np.vstack(
-                [
+            rows = []
+            for frame, timestamp in get_frames(vid_path=vid_path):
+                rows.append(
                     self.get_facial_landmarks(
                         frame=frame,
                         timestamp=timestamp,
                         face_landmarker=face_landmarker,
                     )
-                    for frame, timestamp in get_frames(vid_path=vid_path)
-                ]
-            )
-        return signal
+                )
+        sig = np.vstack(rows)  # (T, 2K)
+
+        # Simple forward-fill per column for NaNs, fallback zeros
+        if np.isnan(sig).any():
+            for j in range(sig.shape[1]):
+                col = sig[:, j]
+                valid = np.where(~np.isnan(col))[0]
+                if valid.size == 0:
+                    sig[:, j] = 0.0
+                else:
+                    last = col[valid[0]]
+                    for i in range(sig.shape[0]):
+                        if np.isnan(col[i]):
+                            col[i] = last
+                        else:
+                            last = col[i]
+                    sig[:, j] = col
+        return sig
