@@ -12,6 +12,7 @@ numpy==1.26.4
 opencv-contrib-python==4.10.0.84
 opencv-python==4.10.0.84
 packaging==24.1
+pandas==2.2.2
 pillow==10.4.0
 protobuf==4.25.3
 pycparser==2.22

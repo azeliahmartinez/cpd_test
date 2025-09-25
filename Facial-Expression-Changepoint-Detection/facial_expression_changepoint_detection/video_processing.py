@@ -1,3 +1,4 @@
+import pandas as pd
 import csv
 from abc import abstractmethod
 from pathlib import Path
@@ -13,15 +14,15 @@ from .video_utils import get_frames_at_indices, save_frames
 
 # Region labels corresponding to _68_INDICES order in landmarks.py
 _REGION_NAMES = [
-    "right_eyebrow",
-    "left_eyebrow",
-    "right_eye",
-    "left_eye",
-    "nose_bridge",
-    "nose_bottom",
-    "outer_lips",
-    "inner_lips",
-    "jawline",
+    "right_eyebrow",  
+    "left_eyebrow",   
+    "right_eye",       
+    "left_eye",        
+    "nose_bridge",    
+    "nose_bottom",      
+    "outer_lips",      
+    "inner_lips",      
+    "jawline",         
 ]
 
 
@@ -200,25 +201,44 @@ class VideoProcessor:
         idx_list = [0] + changepoints
         idx_str = "[" + "|".join(str(cp) for cp in idx_list) + "]"
 
-        row = [self.vid_path.name, frame_count, idx_str]
+        row = {
+            "video": self.vid_path.name,
+            "frame_count": frame_count,
+            "frame_indices": idx_str,
+        }
 
         # global scores column
         if change_scores_global is not None:
-            row.append(self._fmt_scores(change_scores_global, decimals))
+            row[f"global_{frame_count}"] = self._fmt_scores(change_scores_global, decimals)
         else:
-            row.append("")
+            row[f"global_{frame_count}"] = ""
 
         # per-region columns in fixed order; omit regions that had no landmarks
         if change_scores_regions is not None:
             for region_name in _REGION_NAMES:
+                col_name = f"{region_name}_{frame_count}"
                 if change_scores_regions.get(region_name) is not None:
-                    row.append(self._fmt_scores(change_scores_regions[region_name], decimals))
+                    row[col_name] = self._fmt_scores(change_scores_regions[region_name], decimals)
                 else:
-                    row.append("")  # in case region absent
+                    row[col_name] = ""  # in case region absent
+        
         # write
-        with csv_path.open(mode="a", newline="") as csv_file:
-            writer = csv.writer(csv_file, delimiter=",")
-            writer.writerow(tuple(row))
+        fieldnames = ["video", "frame_count", "frame_indices", f"global_{frame_count}"]
+        for region_name in _REGION_NAMES:
+            fieldnames.append(f"{region_name}_{frame_count}")
+
+        row_df = pd.DataFrame([row]).reindex(columns=fieldnames)
+
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if csv_path.exists():
+            prev = pd.read_csv(csv_path)
+            if list(prev.columns) != fieldnames:
+                row_df.to_csv(csv_path, index=False)
+            else:
+                row_df.to_csv(csv_path, mode="a", header=False, index=False)
+        else:
+            row_df.to_csv(csv_path, index=False)
 
     def select_frames_and_save_data(
         self, frame_count: int, output_dir: Path, csv_path: Path
