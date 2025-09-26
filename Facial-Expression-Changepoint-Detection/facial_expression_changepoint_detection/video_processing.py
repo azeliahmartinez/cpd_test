@@ -1,6 +1,8 @@
 import csv
 from pathlib import Path
 from typing import Callable, Optional, Protocol, Dict, List, Sequence
+from .raw_export import export_raw_landmarks_from_frames
+
 
 import numpy as np
 import pandas as pd
@@ -294,6 +296,16 @@ class VideoProcessor:
         # Global & regional scores
         global_scores_all = self.compute_change_scores()
         indices = [0] + changepoints
+
+        # write raw pixel landmarks for these selected frames
+        export_raw_landmarks_from_frames(
+            video_path=self.vid_path,
+            frames_bgr=frames,
+            frame_indices=indices,        # same order as frames
+            out_root=output_dir,
+            n_frames_label=frame_count,
+        )
+
         selected_global = [float(global_scores_all[i]) for i in indices]
 
         region_scores_all = self.compute_change_scores_by_region()
