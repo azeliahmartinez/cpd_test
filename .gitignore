@@ -1,0 +1,36 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+*.log
+
+# ---- Virtual Environment ----
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+
+# ---- Jupyter / IPython ----
+.ipynb_checkpoints/
+*.ipynb
+
+# ---- macOS ----
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ---- IDEs / Editors ----
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---- Project-specific ----
+# Ignore outputs from CPD runs (frames, raw_landmarks, changepoints, etc.)
+output/
+output/**/*.csv
