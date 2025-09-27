@@ -245,35 +245,43 @@ class VideoProcessor:
         idx_list = [0] + changepoints
         idx_str = "[" + "|".join(str(cp) for cp in idx_list) + "]"
 
+        suffix = f"_{frame_count}"
+
         row = {
             "video": self.vid_path.name,
             "frame_count": frame_count,
             "frame_indices": idx_str,
-            "change_scores_global": self._fmt_scores(change_scores_global or [], decimals)
-                                       if change_scores_global is not None else "",
+            f"global{suffix}": (
+                self._fmt_scores(change_scores_global or [], decimals)
+                if change_scores_global is not None else ""
+            ),
         }
 
-        # Fill face region columns
+        # Face regions
         for rn in _FACE_REGION_NAMES:
-            key = rn
-            if change_scores_regions and rn in change_scores_regions:
-                row[key] = self._fmt_scores(change_scores_regions[rn], decimals)
-            else:
-                row[key] = ""
+            key = f"{rn}{suffix}"
+            row[key] = (
+                self._fmt_scores(change_scores_regions[rn], decimals)
+                if change_scores_regions and rn in change_scores_regions
+                else ""
+            )
 
-        # Fill pose region columns
+        # Pose regions
         for rn in _POSE_REGION_NAMES:
-            key = rn
-            if change_scores_regions and rn in change_scores_regions:
-                row[key] = self._fmt_scores(change_scores_regions[rn], decimals)
-            else:
-                row[key] = ""
+            key = f"{rn}{suffix}"
+            row[key] = (
+                self._fmt_scores(change_scores_regions[rn], decimals)
+                if change_scores_regions and rn in change_scores_regions
+                else ""
+            )
 
-        # Write with stable column order
         fieldnames = [
-            "video", "frame_count", "frame_indices", "change_scores_global",
-            *_FACE_REGION_NAMES, *_POSE_REGION_NAMES
+            "video", "frame_count", "frame_indices",
+            f"global{suffix}",
+            *[f"{n}{suffix}" for n in _FACE_REGION_NAMES],
+            *[f"{n}{suffix}" for n in _POSE_REGION_NAMES],
         ]
+
         row_df = pd.DataFrame([row]).reindex(columns=fieldnames)
 
         csv_path.parent.mkdir(parents=True, exist_ok=True)
