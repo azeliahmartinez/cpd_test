@@ -1,13 +1,24 @@
+import os
+import warnings
+
+# Suppress TensorFlow + absl logging
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # 0 = all logs, 1 = INFO, 2 = WARNING, 3 = ERROR
+os.environ["GLOG_minloglevel"] = "2"      # quiets absl logging used inside mediapipe
+
+# Suppress protobuf deprecation warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="google.protobuf")
+
 import csv
 import random
 import time
 from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
-import os
+
 
 from facial_expression_changepoint_detection.landmarks import LandmarksSignalExtractor
 from facial_expression_changepoint_detection.pose_extractor import PoseSignalExtractor
+from facial_expression_changepoint_detection.hand_extractor import HandSignalExtractor
 from facial_expression_changepoint_detection.video_processing import VideoProcessor
 from facial_expression_changepoint_detection.visualization import Animation
 
@@ -29,7 +40,7 @@ def visualize(vid_paths: list[Path], frame_count: int) -> None:
     for vid_path in vid_paths:
         video_processor = VideoProcessor(
             vid_path=vid_path,
-            signal_extractors=[LandmarksSignalExtractor(indices={20}), PoseSignalExtractor()],
+            signal_extractors=[LandmarksSignalExtractor(indices={20}), PoseSignalExtractor(), HandSignalExtractor()],
         )
         animation = Animation(
             vid_path,
@@ -43,7 +54,7 @@ def visualize(vid_paths: list[Path], frame_count: int) -> None:
 def process_video(vid_path: Path, frame_counts: list[int], output_dir: Path) -> str:
     vp = VideoProcessor(
         vid_path=vid_path,
-        signal_extractors=[LandmarksSignalExtractor(), PoseSignalExtractor()],
+        signal_extractors=[LandmarksSignalExtractor(), PoseSignalExtractor(), HandSignalExtractor()],
     )
     vp.process(frame_counts, output_dir)
     return vid_path.name
@@ -72,7 +83,7 @@ def run(
             "video", "frame_count", "frame_indices", "change_scores_global",
             "right_eyebrow", "left_eyebrow", "right_eye", "left_eye",
             "nose_bridge", "nose_bottom", "outer_lips", "inner_lips", "jawline",
-            "left_arm", "right_arm", "torso",
+            "left_arm", "right_arm", "torso", "left_hand", "right_hand",
         ))
 
     if use_multiprocessing:

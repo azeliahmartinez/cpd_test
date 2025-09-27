@@ -11,6 +11,8 @@ import mediapipe as mp
 
 from .landmarks import new_landmarker, preprocess_for_mediapipe, _68_INDICES
 from .pose_extractor import _POSE_OPTS
+from .hand_extractor import _HAND_OPTS
+
 
 # BlazePose indices we care about
 # Left arm: shoulder(11), elbow(13), wrist(15)
@@ -73,7 +75,14 @@ def export_raw_landmarks_from_frames(
     pose_header: Optional[List[str]] = None
     pose_rows: List[List[float | int | str]] = []
 
-    with new_landmarker() as face_lm, mp.tasks.vision.PoseLandmarker.create_from_options(_POSE_OPTS) as pose_lm:
+    hands_header: Optional[List[str]] = None
+    hands_rows: List[List[float | int | str]] = []
+
+
+    with new_landmarker() as face_lm, \
+     mp.tasks.vision.PoseLandmarker.create_from_options(_POSE_OPTS) as pose_lm, \
+     mp.tasks.vision.HandLandmarker.create_from_options(_HAND_OPTS) as hand_lm:
+        
         for k, (frame, ts) in enumerate(zip(frames_bgr, ts_ms)):
             h, w = frame.shape[:2]
 
@@ -138,6 +147,47 @@ def export_raw_landmarks_from_frames(
                     + la_v + ra_v + t_v
                 )
 
+            # ---- Hands: left/right 21 points in pixels (no visibility) ----
+            hand_res = hand_lm.detect_for_video(mp_img, ts_face)  # reuse frame + ts
+            if getattr(hand_res, "hand_landmarks", None):
+                left  = np.full((21, 2), np.nan, dtype=np.float32)
+                right = np.full((21, 2), np.nan, dtype=np.float32)
+
+                def top_label(hcls):
+                    if not hcls:
+                        return "Unknown"
+                    best = max(hcls, key=lambda c: getattr(c, "score", 0.0))
+                    return getattr(best, "category_name", "Unknown")
+
+                for i, lm in enumerate(hand_res.hand_landmarks):
+                    label = "Unknown"
+                    if getattr(hand_res, "handedness", None) and i < len(hand_res.handedness):
+                        label = top_label(hand_res.handedness[i])
+                    xy = np.array([[p.x * w, p.y * h] for p in lm], dtype=np.float32)
+                    if str(label).lower().startswith("left"):
+                        left = xy
+                    elif str(label).lower().startswith("right"):
+                        right = xy
+                    else:
+                        if np.isnan(left).all():
+                            left = xy
+                        else:
+                            right = xy
+
+                if hands_header is None:
+                    hands_header = (
+                        ["video", "frame_index"]
+                        + [f"lh{j}_x" for j in range(21)] + [f"rh{j}_x" for j in range(21)]
+                        + [f"lh{j}_y" for j in range(21)] + [f"rh{j}_y" for j in range(21)]
+                    )
+
+                hands_rows.append(
+                    [video_path.name, frame_indices[k]]
+                    + left[:, 0].astype(float).tolist() + right[:, 0].astype(float).tolist()
+                    + left[:, 1].astype(float).tolist() + right[:, 1].astype(float).tolist()
+                )
+
+
     written: Dict[str, Path] = {}
 
     if face_rows and face_header:
@@ -149,5 +199,11 @@ def export_raw_landmarks_from_frames(
         pose_csv = dst_dir / f"{video_path.stem}_upper_body_{n_frames_label}f.csv"
         _write_csv(pose_csv, pose_header, pose_rows)
         written["pose"] = pose_csv
+
+    if hands_rows and hands_header:
+        hands_csv = dst_dir / f"{video_path.stem}_hands_{n_frames_label}f.csv"
+        _write_csv(hands_csv, hands_header, hands_rows)
+        written["hands"] = hands_csv
+
 
     return written

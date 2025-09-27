@@ -11,6 +11,8 @@ from scipy.signal import savgol_filter
 
 from .landmarks import LandmarksSignalExtractor, _68_INDICES
 from .pose_extractor import PoseSignalExtractor
+from .hand_extractor import HandSignalExtractor
+
 from .video_utils import get_frames_at_indices, save_frames
 
 # Face region labels in the same order as _68_INDICES
@@ -92,34 +94,31 @@ class VideoProcessor:
         T = min(p.shape[0] for p in parts)
         parts = [p[:T] for p in parts]
 
-        # Record offsets and index orders for region mapping
-        # Assume at most one LandmarksSignalExtractor and one PoseSignalExtractor present
-        face_dim = 0
-        pose_dim = 0
+         # Compute offsets in the order of self.signal_extractors
+        offsets, cur = [], 0
+        for p in parts:
+            offsets.append(cur)
+            cur += p.shape[1]
 
-        for se, p in zip(self.signal_extractors, parts):
+        # Reset bookkeeping
+        self._face_offset = 0
+        self._pose_offset = 0
+        self._hand_offset = 0
+        self._face_indices_sorted = None
+        self._pose_indices_sorted = None
+
+        for (se, p, off) in zip(self.signal_extractors, parts, offsets):
             if isinstance(se, LandmarksSignalExtractor):
-                self._face_offset = 0  # face first if present
-                face_dim = p.shape[1]
+                self._face_offset = off
                 self._face_indices_sorted = sorted(se.landmarks_indices)
             elif isinstance(se, PoseSignalExtractor):
-                pose_dim = p.shape[1]
+                self._pose_offset = off
+                self._pose_indices_sorted = list(se.indices)
+            elif isinstance(se, HandSignalExtractor):
+                self._hand_offset = off
+                self._hand_dim = p.shape[1]
 
-        # If both present and face is first in list, pose starts after face
-        # If only pose present, offset is 0
-        if face_dim > 0 and pose_dim > 0:
-            # Ensure order in self.signal_extractors determines concat order
-            if isinstance(self.signal_extractors[0], LandmarksSignalExtractor):
-                self._face_offset = 0
-                self._pose_offset = face_dim
-            else:
-                self._pose_offset = 0
-                self._face_offset = pose_dim
-
-        # Concatenate
-        signal = np.concatenate(parts, axis=1)  # (T, d_face + d_pose) or (T, d_single)
-
-        # Filter (denoise)
+        signal = np.concatenate(parts, axis=1)
         self.filtered_signal = self.noise_filterer(signal)
         if self.filtered_signal.ndim == 1:
             self.filtered_signal = self.filtered_signal[:, None]
@@ -166,6 +165,15 @@ class VideoProcessor:
             if left_arm:  region_map["left_arm"] = left_arm
             if right_arm: region_map["right_arm"] = right_arm
             if torso:     region_map["torso"] = torso
+
+            # Hands regions (if present)
+            # Expect layout: Left(21*2) then Right(21*2) starting at self._hand_offset.
+            if hasattr(self, "_hand_offset"):
+                left_cols  = list(range(self._hand_offset,                self._hand_offset + 21 * 2))
+                right_cols = list(range(self._hand_offset + 21 * 2,      self._hand_offset + 42 * 2))
+                if left_cols:  region_map["left_hand"]  = left_cols
+                if right_cols: region_map["right_hand"] = right_cols
+
 
         self._region_col_indices = region_map
 

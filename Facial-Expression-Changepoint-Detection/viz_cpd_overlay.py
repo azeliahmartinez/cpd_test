@@ -7,6 +7,7 @@ import mediapipe as mp
 import numpy as np
 
 
+
 # ----------------------------- CPD CSV LOADING -----------------------------
 
 def load_cp_indices(csv_path: Path, video_name: str, frame_count: int):
@@ -63,10 +64,13 @@ def build_models(models_root: Path):
     """Create MediaPipe Face & Pose landmarkers from .task models."""
     face_task = models_root / "face_landmarker.task"
     pose_task = models_root / "pose_landmarker.task"
+    hand_task = models_root / "hand_landmarker.task"
     if not face_task.exists():
         raise FileNotFoundError(f"Missing model file: {face_task}")
     if not pose_task.exists():
         raise FileNotFoundError(f"Missing model file: {pose_task}")
+    if not hand_task.exists():
+        raise FileNotFoundError(f"Missing model file: {hand_task}")
 
     BaseOptions = mp.tasks.BaseOptions
     VisionRunningMode = mp.tasks.vision.RunningMode
@@ -94,9 +98,22 @@ def build_models(models_root: Path):
         min_tracking_confidence=0.2,
     )
 
+    # Hands
+    HandLandmarker = mp.tasks.vision.HandLandmarker
+    HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
+    hand_opts = HandLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=str(hand_task)),
+        running_mode=VisionRunningMode.VIDEO,
+        num_hands=2,
+        min_hand_detection_confidence=0.2,
+        min_hand_presence_confidence=0.2,
+        min_tracking_confidence=0.2,
+    )
+
     face_model = FaceLandmarker.create_from_options(face_opts)
     pose_model = PoseLandmarker.create_from_options(pose_opts)
-    return face_model, pose_model
+    hand_model = HandLandmarker.create_from_options(hand_opts)
+    return face_model, pose_model, hand_model
 
 
 def mp_image_from_bgr(frame: np.ndarray) -> mp.Image:
@@ -151,6 +168,51 @@ def draw_pose_points_and_edges(frame: np.ndarray, pose_landmarks, point_color=(0
             bx, by = int(pb.x * w), int(pb.y * h)
             cv2.line(frame, (ax, ay), (bx, by), edge_color, 2)
 
+def draw_hand_points(frame: np.ndarray, hand_res, left_color=(0, 255, 0), right_color=(0, 160, 255)):
+    """
+    Draw 21 landmarks per hand as small circles (left=green, right=orange).
+    """
+    if not hand_res or not getattr(hand_res, "hand_landmarks", None):
+        return
+
+    h, w = frame.shape[:2]
+
+    def _top_label(hcls):
+        if not hcls:
+            return "Unknown"
+        best = max(hcls, key=lambda c: getattr(c, "score", 0.0))
+        return getattr(best, "category_name", "Unknown")
+
+    left_xy = None
+    right_xy = None
+
+    for i, lm in enumerate(hand_res.hand_landmarks):
+        label = "Unknown"
+        if getattr(hand_res, "handedness", None) and i < len(hand_res.handedness):
+            label = _top_label(hand_res.handedness[i])
+
+        xy = np.array([[p.x * w, p.y * h] for p in lm], dtype=np.float32)
+        if str(label).lower().startswith("left"):
+            left_xy = xy
+        elif str(label).lower().startswith("right"):
+            right_xy = xy
+        else:
+            if left_xy is None:
+                left_xy = xy
+            else:
+                right_xy = xy
+
+    if left_xy is not None:
+        for (x, y) in left_xy:
+            if np.isfinite(x) and np.isfinite(y):
+                cv2.circle(frame, (int(x), int(y)), 3, left_color, -1)
+
+    if right_xy is not None:
+        for (x, y) in right_xy:
+            if np.isfinite(x) and np.isfinite(y):
+                cv2.circle(frame, (int(x), int(y)), 3, right_color, -1)
+
+
 
 # --------------------------------- MAIN ------------------------------------
 
@@ -174,7 +236,8 @@ def main():
     models_root = Path(__file__).parent / "facial_expression_changepoint_detection" / "pretrained_models"
 
     # Build models
-    face_model, pose_model = build_models(models_root)
+    face_model, pose_model, hand_model = build_models(models_root)
+
 
     # Open video (try AVFoundation on macOS, default otherwise)
     cap = cv2.VideoCapture(str(video_path), cv2.CAP_AVFOUNDATION)
@@ -212,6 +275,11 @@ def main():
         if pose_res and pose_res.pose_landmarks:
             draw_pose_points_and_edges(frame, pose_res.pose_landmarks,
                                        point_color=(0, 255, 0), edge_color=(0, 180, 0))
+            
+        # Hand landmarks
+        hand_res = hand_model.detect_for_video(mp_img, ts_ms)
+        draw_hand_points(frame, hand_res)
+
 
         # Highlight CP frames
         if frame_idx in cp_indices:
@@ -231,6 +299,7 @@ def main():
     # Close models
     face_model.close()
     pose_model.close()
+    hand_model.close()
 
 
 if __name__ == "__main__":
