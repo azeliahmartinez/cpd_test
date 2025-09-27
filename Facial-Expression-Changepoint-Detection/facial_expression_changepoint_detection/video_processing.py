@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Callable, Optional, Protocol, Dict, List, Sequence
 from .raw_export import export_raw_landmarks_from_frames
 
-
 import numpy as np
 import pandas as pd
 import ruptures as rpt
@@ -24,8 +23,11 @@ _FACE_REGION_NAMES = [
     "jawline",
 ]
 
-# Pose region labels (based on Pose keypoints: shoulders=11/12, elbows=13/14, wrists=15/16, hips=23/24)
+# Pose region labels
 _POSE_REGION_NAMES = ["left_arm", "right_arm", "torso"]
+
+# Hand region labels
+_HAND_REGION_NAMES = ["left_hand", "right_hand"]
 
 
 class SignalExtractor(Protocol):
@@ -61,9 +63,8 @@ class VideoProcessor:
             T = sig.shape[0]
             if T < 3:
                 return sig
-            # choose odd window <= T, at least 3
             win = min(17, T if T % 2 == 1 else T - 1)
-            if win < 3:  # still too small
+            if win < 3:
                 return sig
             poly = min(13, win - 1)
             return savgol_filter(sig, window_length=win, polyorder=poly, axis=0, mode="nearest")
@@ -78,9 +79,10 @@ class VideoProcessor:
         # bookkeeping for column maps
         self._face_offset: int = 0
         self._pose_offset: int = 0
+        self._hand_offset: int = 0
         self._face_indices_sorted: Optional[List[int]] = None
         self._pose_indices_sorted: Optional[List[int]] = None
-        self._region_col_indices: Optional[Dict[str, List[int]]] = None  # face+pose regions
+        self._region_col_indices: Optional[Dict[str, List[int]]] = None  # face+pose+hand
 
     # ---------- internal helpers ----------
 
@@ -88,13 +90,10 @@ class VideoProcessor:
         if self.filtered_signal is not None:
             return
 
-        # Extract per-frame vectors for each extractor
         parts = [se.extract_signal(self.vid_path) for se in self.signal_extractors]
-        # Align by shortest T
         T = min(p.shape[0] for p in parts)
         parts = [p[:T] for p in parts]
 
-         # Compute offsets in the order of self.signal_extractors
         offsets, cur = [], 0
         for p in parts:
             offsets.append(cur)
@@ -129,7 +128,7 @@ class VideoProcessor:
 
         region_map: Dict[str, List[int]] = {}
 
-        # Face regions (if face present)
+        # Face
         if self._face_indices_sorted is not None:
             idx_to_pos = {lm_idx: pos for pos, lm_idx in enumerate(self._face_indices_sorted)}
             for region_name, region_indices in zip(_FACE_REGION_NAMES, _68_INDICES):
@@ -141,12 +140,11 @@ class VideoProcessor:
                 if cols:
                     region_map[region_name] = cols
 
-        # Pose regions (if pose present)
-        # We infer which pose indices were used by inspecting the PoseSignalExtractor
+        # Pose
         pose_extractors = [se for se in self.signal_extractors if isinstance(se, PoseSignalExtractor)]
         if pose_extractors:
             pose_se = pose_extractors[0]
-            self._pose_indices_sorted = list(pose_se.indices)  # as provided
+            self._pose_indices_sorted = list(pose_se.indices)
             ppos = {lm_idx: pos for pos, lm_idx in enumerate(self._pose_indices_sorted)}
 
             def pose_cols(for_ids: List[int]) -> List[int]:
@@ -157,42 +155,32 @@ class VideoProcessor:
                         cols.extend([self._pose_offset + 2 * j, self._pose_offset + 2 * j + 1])
                 return cols
 
-            # Define regions
-            left_arm = pose_cols([11, 13, 15])   # L shoulder, elbow, wrist
-            right_arm = pose_cols([12, 14, 16])  # R shoulder, elbow, wrist
-            torso = pose_cols([11, 12, 23, 24])  # shoulders + hips
+            left_arm = pose_cols([11, 13, 15])
+            right_arm = pose_cols([12, 14, 16])
+            torso = pose_cols([11, 12, 23, 24])
 
             if left_arm:  region_map["left_arm"] = left_arm
             if right_arm: region_map["right_arm"] = right_arm
             if torso:     region_map["torso"] = torso
 
-            # Hands regions (if present)
-            # Expect layout: Left(21*2) then Right(21*2) starting at self._hand_offset.
-            if hasattr(self, "_hand_offset"):
-                left_cols  = list(range(self._hand_offset,                self._hand_offset + 21 * 2))
-                right_cols = list(range(self._hand_offset + 21 * 2,      self._hand_offset + 42 * 2))
-                if left_cols:  region_map["left_hand"]  = left_cols
-                if right_cols: region_map["right_hand"] = right_cols
-
+        # Hands
+        if hasattr(self, "_hand_offset"):
+            left_cols  = list(range(self._hand_offset, self._hand_offset + 21 * 2))
+            right_cols = list(range(self._hand_offset + 21 * 2, self._hand_offset + 42 * 2))
+            if left_cols:  region_map["left_hand"] = left_cols
+            if right_cols: region_map["right_hand"] = right_cols
 
         self._region_col_indices = region_map
 
     # ---------- change-score computations ----------
 
     def compute_change_scores(self) -> np.ndarray:
-        """
-        Global change score per frame:
-        scores[t] = || filtered[t] - filtered[t-1] ||_2 ; scores[0]=0
-        """
         self._ensure_filtered_signal()
         diffs = np.diff(self.filtered_signal, axis=0)
         step_l2 = np.linalg.norm(diffs, axis=1)
         return np.concatenate(([0.0], step_l2)).astype(float)
 
     def compute_change_scores_by_region(self) -> Dict[str, np.ndarray]:
-        """
-        Per-region change score per frame (same L2 step, restricted to region columns).
-        """
         self._ensure_filtered_signal()
         self._build_region_column_map()
         assert self._region_col_indices is not None
@@ -245,11 +233,6 @@ class VideoProcessor:
         change_scores_regions: Optional[Dict[str, List[float]]] = None,
         decimals: int = 4,
     ) -> None:
-        """
-        One row per (video, frame_count) with fixed columns:
-        video, frame_count, frame_indices, change_scores_global,
-        <face regions...>, <pose regions...>
-        """
         idx_list = [0] + changepoints
         idx_str = "[" + "|".join(str(cp) for cp in idx_list) + "]"
 
@@ -265,7 +248,7 @@ class VideoProcessor:
             ),
         }
 
-        # Face regions
+        # Face
         for rn in _FACE_REGION_NAMES:
             key = f"{rn}{suffix}"
             row[key] = (
@@ -274,8 +257,17 @@ class VideoProcessor:
                 else ""
             )
 
-        # Pose regions
+        # Pose
         for rn in _POSE_REGION_NAMES:
+            key = f"{rn}{suffix}"
+            row[key] = (
+                self._fmt_scores(change_scores_regions[rn], decimals)
+                if change_scores_regions and rn in change_scores_regions
+                else ""
+            )
+
+        # Hands
+        for rn in _HAND_REGION_NAMES:
             key = f"{rn}{suffix}"
             row[key] = (
                 self._fmt_scores(change_scores_regions[rn], decimals)
@@ -288,6 +280,7 @@ class VideoProcessor:
             f"global{suffix}",
             *[f"{n}{suffix}" for n in _FACE_REGION_NAMES],
             *[f"{n}{suffix}" for n in _POSE_REGION_NAMES],
+            *[f"{n}{suffix}" for n in _HAND_REGION_NAMES],
         ]
 
         row_df = pd.DataFrame([row]).reindex(columns=fieldnames)
@@ -296,7 +289,6 @@ class VideoProcessor:
         if csv_path.exists():
             prev_cols = list(pd.read_csv(csv_path, nrows=0).columns)
             if prev_cols != fieldnames:
-                # Reset file if schema changed
                 row_df.to_csv(csv_path, index=False)
             else:
                 row_df.to_csv(csv_path, mode="a", header=False, index=False)
@@ -309,15 +301,13 @@ class VideoProcessor:
         frames, changepoints = self.select_frames(frame_count)
         self.save_frames_to_directory(output_dir, frames, frame_count)
 
-        # Global & regional scores
         global_scores_all = self.compute_change_scores()
         indices = [0] + changepoints
 
-        # write raw pixel landmarks for these selected frames
         export_raw_landmarks_from_frames(
             video_path=self.vid_path,
             frames_bgr=frames,
-            frame_indices=indices,        # same order as frames
+            frame_indices=indices,
             out_root=output_dir,
             n_frames_label=frame_count,
         )
