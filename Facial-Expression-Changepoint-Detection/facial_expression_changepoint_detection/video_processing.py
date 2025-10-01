@@ -98,6 +98,8 @@ class VideoProcessor:
         for p in parts:
             offsets.append(cur)
             cur += p.shape[1]
+        
+        self._raw_signal_concat = np.concatenate(parts, axis=1) 
 
         # Reset bookkeeping
         self._face_offset = 0
@@ -109,9 +111,11 @@ class VideoProcessor:
         for (se, p, off) in zip(self.signal_extractors, parts, offsets):
             if isinstance(se, LandmarksSignalExtractor):
                 self._face_offset = off
+                self._face_dim = p.shape[1] 
                 self._face_indices_sorted = sorted(se.landmarks_indices)
             elif isinstance(se, PoseSignalExtractor):
                 self._pose_offset = off
+                self._pose_dim = p.shape[1]
                 self._pose_indices_sorted = list(se.indices)
             elif isinstance(se, HandSignalExtractor):
                 self._hand_offset = off
@@ -229,6 +233,52 @@ class VideoProcessor:
     def _fmt_scores(self, values: list[float], decimals: int = 4) -> str:
         return "[" + "|".join(f"{v:.{decimals}f}" for v in values) + "]"
 
+    def _fmt_xy_pairs(self, xy_flat: np.ndarray) -> str:
+        pairs = []
+        it = iter(xy_flat.tolist())
+        for x in it:
+            y = next(it, None)
+            if y is None:
+                break
+            pairs.append(f"{x:.4f},{y:.4f}")
+        return "[" + "|".join(pairs) + "]"
+    
+    def _starting_coords_strings(self, start_idx: int) -> Dict[str, str]:
+        """
+        Returns compact strings for starting XY coords per modality:
+        - 'start_face_xy' (if face exists)
+        - 'start_pose_xy' (if pose exists)
+        - 'start_left_hand_xy' and 'start_right_hand_xy' (if hands exist)
+        """
+        self._ensure_filtered_signal()
+        row = self._raw_signal_concat[start_idx] 
+
+        out: Dict[str, str] = {}
+
+        # Face block
+        if getattr(self, "_face_dim", 0) > 0:
+            s = self._face_offset
+            e = self._face_offset + self._face_dim
+            out["start_face_xy"] = self._fmt_xy_pairs(row[s:e])
+
+        # Pose block
+        if getattr(self, "_pose_dim", 0) > 0:
+            s = self._pose_offset
+            e = self._pose_offset + self._pose_dim
+            out["start_pose_xy"] = self._fmt_xy_pairs(row[s:e])
+
+        # Hands block (left then right: 21*2 each within the hand block)
+        if getattr(self, "_hand_dim", 0) > 0:
+            s = self._hand_offset
+            # Expecting 42 landmarks * 2 = 84 for both hands; still robust if fewer
+            half = min(self._hand_dim // 2, 21 * 2)  # left hand slice width
+            sL, eL = s, s + half
+            sR, eR = s + half, s + self._hand_dim
+            out["start_left_hand_xy"]  = self._fmt_xy_pairs(row[sL:eL])
+            out["start_right_hand_xy"] = self._fmt_xy_pairs(row[sR:eR])
+
+        return out
+    
     def save_changepoints_to_csv(
         self,
         changepoints: list[int],
@@ -237,6 +287,7 @@ class VideoProcessor:
         change_scores_global: Optional[List[float]] = None,
         change_scores_regions: Optional[Dict[str, List[float]]] = None,
         decimals: int = 4,
+        start_coords: Optional[Dict[str, str]] = None,
     ) -> None:
         idx_list = changepoints
         idx_str = "[" + "|".join(str(cp) for cp in idx_list) + "]"
@@ -279,14 +330,20 @@ class VideoProcessor:
                 if change_scores_regions and rn in change_scores_regions
                 else ""
             )
+        
+        if start_coords:
+            row.update(start_coords)
 
         fieldnames = [
             "video", "frame_count", "frame_indices",
-            f"global{suffix}",
-            *[f"{n}{suffix}" for n in _FACE_REGION_NAMES],
-            *[f"{n}{suffix}" for n in _POSE_REGION_NAMES],
-            *[f"{n}{suffix}" for n in _HAND_REGION_NAMES],
+            f"global{suffix}", 
+            "start_face_xy", *[f"{n}{suffix}" for n in _FACE_REGION_NAMES],
+            "start_pose_xy",  *[f"{n}{suffix}" for n in _POSE_REGION_NAMES],
+            "start_left_hand_xy", "start_right_hand_xy", *[f"{n}{suffix}" for n in _HAND_REGION_NAMES],
         ]
+
+        for k in ("start_face_xy", "start_pose_xy", "start_left_hand_xy", "start_right_hand_xy"):
+            row.setdefault(k, "")
 
         row_df = pd.DataFrame([row]).reindex(columns=fieldnames)
 
@@ -311,6 +368,9 @@ class VideoProcessor:
             frame_count=frame_count,
             indices=changepoints, 
         )
+
+        start_idx = changepoints[0] if changepoints else 0  # fallback to 0 if no changepoint is found
+        start_coords = self._starting_coords_strings(start_idx)
 
         global_scores_all = self.compute_change_scores()
         indices = changepoints                               
@@ -337,6 +397,7 @@ class VideoProcessor:
             frame_count=frame_count,
             change_scores_global=selected_global,
             change_scores_regions=selected_region_scores,
+            start_coords=start_coords,  
         )
 
     def process(self, frame_counts: list[int], output_dir: Path) -> None:
