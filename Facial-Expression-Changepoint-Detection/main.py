@@ -173,7 +173,7 @@ def main() -> None:
         chunksize=8,
         output_dir_name=output_dir_name,
     )
-    print(f"Finished processing all videos in {time_took/(60*60)} hours.")
+    print(f"Finished processing all videos in {time_took/60:.2f} minutes.")
 
 
 if __name__ == "__main__":

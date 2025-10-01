@@ -206,20 +206,25 @@ class VideoProcessor:
         )[:-1]
         return changepoints
 
-    def select_frames(self, frame_count: int) -> tuple[list[np.ndarray], list[int]]:
-        changepoints = self.get_changepoints(num_changepoints=max(0, frame_count - 1))
-        indices = [0] + (changepoints if frame_count > 1 else [])
+    def select_frames(self, frame_count: int) -> tuple[list[np.ndarray], list[int]]:    
+        changepoints = self.get_changepoints(num_changepoints=frame_count) if frame_count > 0 else []
+        indices = changepoints                     
         frames = get_frames_at_indices(vid_path=self.vid_path, indices=indices)
         return frames, changepoints
 
     def save_frames_to_directory(
-        self, output_dir: Path, frames: list[np.ndarray], frame_count: int
+        self, output_dir: Path, frames: list[np.ndarray], frame_count: int, 
+        indices: Optional[list[int]] = None,   ordinal_names: bool = False,  
     ) -> None:
+        frames, changepoints = self.select_frames(frame_count)
         subdir = output_dir / f"{frame_count}_frames" / self.vid_path.stem
         if not subdir.exists():
             Path.mkdir(subdir, parents=True)
-        filenames = [f"{i}.png" for i in range(frame_count)]
+
+        filenames = [f"{idx}.png" for idx in changepoints]
         save_frames(output_dir=subdir, frames=frames, filenames=filenames)
+        # filenames = [f"{i}.png" for i in range(frame_count)]
+        # save_frames(output_dir=subdir, frames=frames, filenames=filenames)
 
     def _fmt_scores(self, values: list[float], decimals: int = 4) -> str:
         return "[" + "|".join(f"{v:.{decimals}f}" for v in values) + "]"
@@ -233,7 +238,7 @@ class VideoProcessor:
         change_scores_regions: Optional[Dict[str, List[float]]] = None,
         decimals: int = 4,
     ) -> None:
-        idx_list = [0] + changepoints
+        idx_list = changepoints
         idx_str = "[" + "|".join(str(cp) for cp in idx_list) + "]"
 
         suffix = f"_{frame_count}"
@@ -299,10 +304,16 @@ class VideoProcessor:
         self, frame_count: int, output_dir: Path, csv_path: Path
     ) -> None:
         frames, changepoints = self.select_frames(frame_count)
-        self.save_frames_to_directory(output_dir, frames, frame_count)
+        
+        self.save_frames_to_directory(
+            output_dir=output_dir,
+            frames=frames,
+            frame_count=frame_count,
+            indices=changepoints, 
+        )
 
         global_scores_all = self.compute_change_scores()
-        indices = [0] + changepoints
+        indices = changepoints                               
 
         export_raw_landmarks_from_frames(
             video_path=self.vid_path,
