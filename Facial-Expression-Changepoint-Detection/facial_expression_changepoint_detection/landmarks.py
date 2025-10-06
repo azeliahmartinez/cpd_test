@@ -41,6 +41,7 @@ _DEFAULT_INDICES = set().union(*_68_INDICES)
 def preprocess_for_mediapipe(
     frame: np.ndarray, timestamp: float
 ) -> tuple[mp.Image, int]:
+    """Convert BGR frame to an mp.Image (RGB) and round timestamp to int ms."""
     rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
     mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
     return mp_img, round(timestamp)
@@ -51,6 +52,10 @@ def new_landmarker() -> mp.tasks.vision.FaceLandmarker:
 
 
 class LandmarksSignalExtractor:
+    """
+    Returns per-frame face landmarks as **pixel coordinates** (x_px, y_px) for
+    the selected Mediapipe indices, flattened into a 1D vector.
+    """
     def __init__(self, indices: Optional[set[int]] = None):
         self.landmarks_indices = indices if indices else _DEFAULT_INDICES
         self._vec_len = 2 * len(self.landmarks_indices)  # x,y per landmark
@@ -61,26 +66,32 @@ class LandmarksSignalExtractor:
         timestamp: float,
         face_landmarker: mp.tasks.vision.FaceLandmarker,
     ) -> np.ndarray:
+        """
+        Convert Mediapipe's normalized coords to **pixels** using the current
+        frame width/height. If no face is detected, return NaNs (later
+        forward-filled).
+        """
+        h, w = frame.shape[:2]
         mp_img, ts = preprocess_for_mediapipe(frame, timestamp)
         mp_results = face_landmarker.detect_for_video(mp_img, ts)
 
-        # If no face detected, return NaNs for later fill
         if not mp_results.face_landmarks:
             return np.full((self._vec_len,), np.nan, dtype=float)
 
         facial_landmarks = mp_results.face_landmarks[0]
         rows = []
-        for i, landmark_container in enumerate(facial_landmarks):
+        for i, lm in enumerate(facial_landmarks):
             if i in self.landmarks_indices:
-                rows.append([landmark_container.x, landmark_container.y])
+                # convert normalized [0..1] to **pixels**
+                rows.append([lm.x * w, lm.y * h])
         if not rows:
             return np.full((self._vec_len,), np.nan, dtype=float)
         arr = np.array(rows, dtype=float)
         return arr.ravel()
 
     def extract_signal(self, vid_path: Path) -> np.ndarray:
+        rows = []
         with new_landmarker() as face_landmarker:
-            rows = []
             for frame, timestamp in get_frames(vid_path=vid_path):
                 rows.append(
                     self.get_facial_landmarks(
@@ -89,9 +100,9 @@ class LandmarksSignalExtractor:
                         face_landmarker=face_landmarker,
                     )
                 )
-        sig = np.vstack(rows)  # (T, 2K)
+        sig = np.vstack(rows)  # (T, 2K) pixel coords
 
-        # Simple forward-fill per column for NaNs, fallback zeros
+        # Forward-fill NaNs per column, fallback zeros if column is entirely NaN
         if np.isnan(sig).any():
             for j in range(sig.shape[1]):
                 col = sig[:, j]

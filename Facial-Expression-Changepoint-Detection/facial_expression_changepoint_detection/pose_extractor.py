@@ -27,23 +27,11 @@ def _mp_img(frame: np.ndarray) -> mp.Image:
     rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
     return mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
-def _normalize_xy(xy: np.ndarray) -> np.ndarray:
-    """
-    Center and scale by a robust torso size (shoulder/hip spans).
-    xy are normalized image coords in [0,1].
-    """
-    refs = []
-    def dist(a, b):
-        return np.linalg.norm(xy[a] - xy[b]) if a < len(xy) and b < len(xy) else np.nan
-    for a, b in [(11,12), (23,24), (11,23), (12,24)]:
-        v = dist(a, b)
-        if not np.isnan(v): refs.append(v)
-    scale = np.median(refs) if refs else 1.0
-    if scale <= 1e-6: scale = 1.0
-    centered = xy - np.nanmean(xy, axis=0)
-    return centered / scale
-
 class PoseSignalExtractor:
+    """
+    Returns per-frame pose landmarks as **pixel coordinates** (x_px, y_px) for
+    selected indices, flattened. No normalization; ML can learn distances.
+    """
     def __init__(self, indices: Optional[list[int]] = None):
         self.indices = indices if indices is not None else _POSE_LM_DEFAULT
         self._vec_len = 2 * len(self.indices)
@@ -52,18 +40,21 @@ class PoseSignalExtractor:
         rows = []
         with mp.tasks.vision.PoseLandmarker.create_from_options(_POSE_OPTS) as pose:
             for frame, ts_ms in get_frames(vid_path):
+                h, w = frame.shape[:2]
                 res = pose.detect_for_video(_mp_img(frame), round(ts_ms))
-                if not res.pose_landmarks:
-                    rows.append(np.full((self._vec_len,), np.nan))
+                if not getattr(res, "pose_landmarks", None):
+                    rows.append(np.full((self._vec_len,), np.nan, dtype=float))
                     continue
-                lm = res.pose_landmarks[0]  # 33 landmarks
-                xy = np.array([[p.x, p.y] for p in lm], dtype=float)  # (33,2)
-                xy = _normalize_xy(xy)
-                sel = xy[self.indices]                                # (M,2)
-                rows.append(sel.ravel())                              # (2M,)
-        sig = np.vstack(rows)                                         # (T, 2M)
 
-        # forward-fill NaNs, fallback zeros
+                lm = res.pose_landmarks[0]  # 33 landmarks
+                # Convert normalized coords to **pixels**
+                xy = np.array([[p.x * w, p.y * h] for p in lm], dtype=float)  # (33,2)
+                sel = xy[self.indices]                                         # (M,2)
+                rows.append(sel.ravel())                                       # (2M,)
+
+        sig = np.vstack(rows)  # (T, 2M)
+
+        # Forward-fill NaNs per column, fallback zeros if column is entirely NaN
         if np.isnan(sig).any():
             for j in range(sig.shape[1]):
                 col = sig[:, j]
