@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Up2Face • Upload</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <script src="https://unpkg.com/feather-icons"></script>
+</head>
+<body>
+  <div data-include="/partials/header.html"></div>
+  <div class="ef-page">
+    <div data-include="/partials/sidebar.html"></div>
+    <main class="ef-content">
+      <div class="upload-card card">
+        <h1>Upload Video for Engagement Analysis</h1>
+        <p class="muted">Drag & drop your lecture video or browse to select a file.</p>
+        <div class="dropzone" id="dropzone">
+          <i data-feather="cloud-upload"></i>
+          <p>Drag & Drop Your Video Here</p>
+          <span>or</span>
+          <label class="btn btn-outline">
+            <input id="fileInput" type="file" accept=".mp4,.mov,.avi" hidden />
+            Browse Files
+          </label>
+          <p class="muted small">Max 5GB • MP4, MOV, AVI</p>
+        </div>
+        <button class="btn btn-primary wide" id="analyzeBtn" disabled>Analyze Video</button>
+        <div class="progress-area">
+          <div class="progress-bar" id="progressBar"></div>
+          <p id="uploadStatus" class="muted"></p>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div data-include="/partials/footer.html"></div>
+  <script src="/js/app.js"></script>
+</body>
+</html>

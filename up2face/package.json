@@ -1,0 +1,12 @@
+{
+  "name": "engageflow",
+  "version": "1.2.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.0.0"
+  }
+}

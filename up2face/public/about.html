@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Up2Face • About</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <script src="https://unpkg.com/feather-icons"></script>
+</head>
+<body>
+  <div data-include="/partials/header.html"></div>
+  <div class="ef-page">
+    <div data-include="/partials/sidebar.html"></div>
+    <main class="ef-content">
+      <section class="about-hero-startup">
+        <h1>AI‑Driven Student Engagement Detection</h1>
+        <p>Helping educators visualize focus in real time through facial and upper‑body gesture analysis.</p>
+      </section>
+
+      <!-- Feature highlights -->
+      <section class="feature-tiles">
+        <article class="tile">
+          <i data-feather="zap"></i>
+          <h3>Real‑Time Detection</h3>
+          <p>Monitors engagement from facial and body cues as the video plays.</p>
+        </article>
+        <article class="tile">
+          <i data-feather="aperture"></i>
+          <h3>Multi‑Gesture Tracking</h3>
+          <p>Leverages facial, upper‑body, and hand landmarks via MediaPipe.</p>
+        </article>
+        <article class="tile">
+          <i data-feather="bar-chart"></i>
+          <h3>Actionable Insights</h3>
+          <p>Visualizes key engagement moments and overall classroom trends.</p>
+        </article>
+      </section>
+
+      <section class="block alt">
+        <h2><i data-feather="book-open"></i> Study Overview</h2>
+        <p>
+          The shift to virtual classrooms has made it difficult for educators to gauge whether students remain attentive during lectures.
+          This study designs and evaluates a computer‑vision‑based system that detects engagement in real time, translating subtle nonverbal cues into actionable insights.
+        </p>
+      </section>
+
+      <section class="block">
+        <h2><i data-feather="help-circle"></i> Problem Statement</h2>
+        <p>
+          Educators rely on visual cues to assess participation, but these are limited or lost in virtual settings. This work investigates whether
+          facial landmarks and upper‑body/hand gestures can be reliable indicators of student engagement.
+        </p>
+      </section>
+
+      <section class="block alt">
+        <h2><i data-feather="target"></i> Objectives</h2>
+        <ul class="bullets">
+          <li>Detect engagement levels from facial and body movements.</li>
+          <li>Implement real‑time analysis with computer vision and ML.</li>
+          <li>Visualize trends, key moments, and summary scores for educators.</li>
+          <li>Evaluate the system’s performance and responsiveness.</li>
+        </ul>
+      </section>
+
+      <section class="block">
+        <h2><i data-feather="cpu"></i> Methodology</h2>
+        <div class="method-grid">
+          <div>
+            <h4>Data Collection</h4>
+            <p>Used a public dataset the DAISEE Dataset and collected 5 30‑minute recordings of students during online classes.</p>
+          </div>
+          <div>
+            <h4>Landmarks</h4>
+            <p>Facial, upper‑body, and hand landmarks via MediaPipe.</p>
+          </div>
+          <div>
+            <h4>Changepoints</h4>
+            <p>Ruptures library segments notable behavior changes.</p>
+          </div>
+          <div>
+            <h4>Classification</h4>
+            <p>Random Forest model estimates engagement levels.</p>
+          </div>
+          <div>
+            <h4>Visualization</h4>
+            <p>Interactive dashboard presents results and insights.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="block alt">
+        <h2><i data-feather="activity"></i> Scope & Limitations</h2>
+        <p>
+          Focused on online classroom videos and upper‑body cues; eye‑gaze and emotion recognition are beyond scope. Real‑time performance depends on hardware.
+        </p>
+      </section>
+
+      <section class="block">
+        <h2><i data-feather="bar-chart-2"></i> Significance</h2>
+        <p>
+          Provides educators with objective indicators of engagement, supporting data‑informed teaching strategies and more inclusive digital learning experiences.
+        </p>
+      </section>
+
+      <!-- Team -->
+      <section class="team-grid">
+        <h2><i data-feather="users"></i> Meet the Team</h2>
+        <div class="team-cards">
+          <div class="team-card">
+            <h3>Felix Melford Mangawang</h3>
+            <p>Researcher</p>
+          </div>
+          <div class="team-card">
+            <h3>Azeliah Martinez</h3>
+            <p>Researcher</p>
+          </div>
+          <div class="team-card">
+            <h3>Bill Jethro Paredes</h3>
+            <p>Researcher</p>
+          </div>
+          <div class="team-card">
+            <h3>Keisha Leigh Villanueva</h3>
+            <p>Researcher</p>
+          </div>
+          <div class="team-card advisor">
+            <h3>Dr. Judith Azcarraga</h3>
+            <p>Advisor</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+  <div data-include="/partials/footer.html"></div>
+  <script src="/js/app.js"></script>
+</body>
+</html>
