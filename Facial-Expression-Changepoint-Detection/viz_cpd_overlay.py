@@ -1,37 +1,12 @@
 import argparse
-import csv
 from pathlib import Path
 
 import cv2
 import mediapipe as mp
 import numpy as np
 
-
-
-# ----------------------------- CPD CSV LOADING -----------------------------
-
-def load_cp_indices(csv_path: Path, video_name: str, frame_count: int):
-    """Return a set of frame indices for the given video and frame_count from changepoints.csv."""
-    indices = None
-    with open(csv_path, newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row["video"] == video_name and int(row["frame_count"]) == frame_count:
-                # frame_indices looks like: [0|56|198]
-                raw = row["frame_indices"].strip()
-                raw = raw.strip("[]")
-                if raw:
-                    indices = {int(x) for x in raw.split("|")}
-                else:
-                    indices = set()
-                break
-    if indices is None:
-        raise ValueError(f"No row found in {csv_path} for video={video_name!r} and frame_count={frame_count}")
-    return indices
-
-
 # ----------------------------- LANDMARK SETS -------------------------------
-# Face subset: same “68-style” regions you use in your pipeline.
+# Face subset: same "68-style" regions you use in your pipeline.
 _FACE_GROUPS = [
     {46, 53, 52, 65, 55},                    # right eyebrow
     {285, 295, 282, 283, 276},               # left eyebrow
@@ -123,13 +98,6 @@ def mp_image_from_bgr(frame: np.ndarray) -> mp.Image:
 
 # ----------------------------- DRAW HELPERS --------------------------------
 
-def draw_cpd_banner(frame: np.ndarray):
-    h, w = frame.shape[:2]
-    cv2.rectangle(frame, (0, 0), (w, 50), (0, 0, 255), thickness=-1)
-    cv2.putText(frame, "CHANGE-POINT (CP)", (12, 35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
-
-
 def draw_face_points(frame: np.ndarray, face_landmarks, color=(255, 200, 0)):
     """Draw selected face landmarks as small circles."""
     if not face_landmarks:
@@ -213,31 +181,21 @@ def draw_hand_points(frame: np.ndarray, hand_res, left_color=(0, 255, 0), right_
                 cv2.circle(frame, (int(x), int(y)), 3, right_color, -1)
 
 
-
 # --------------------------------- MAIN ------------------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Overlay CPD markers + face/pose landmarks on video playback.")
+    ap = argparse.ArgumentParser(description="Real-time face, pose, and hand landmarks visualization")
     ap.add_argument("--video", required=True, help="Path to the video file (e.g., dataset/5000441001.avi)")
-    ap.add_argument("--csv", default="output/changepoints.csv", help="Path to changepoints.csv (default: output/changepoints.csv)")
-    ap.add_argument("--frames", type=int, default=3, help="Which frame_count to visualize (must exist in CSV). Default: 3")
     ap.add_argument("--fps", type=float, default=0, help="Override display FPS (0 = use source FPS)")
     args = ap.parse_args()
 
     video_path = Path(args.video)
-    csv_path = Path(args.csv)
-    frame_count = args.frames
-
-    # Load CP indices
-    cp_indices = load_cp_indices(csv_path, video_path.name, frame_count)
-    print(f"Loaded CP indices for {video_path.name} (frame_count={frame_count}): {sorted(cp_indices)}")
 
     # Where the .task models live relative to this script
     models_root = Path(__file__).parent / "facial_expression_changepoint_detection" / "pretrained_models"
 
     # Build models
     face_model, pose_model, hand_model = build_models(models_root)
-
 
     # Open video (try AVFoundation on macOS, default otherwise)
     cap = cv2.VideoCapture(str(video_path), cv2.CAP_AVFOUNDATION)
@@ -250,48 +208,54 @@ def main():
     wait_ms = int(1000.0 / (args.fps if args.fps > 0 else src_fps))
 
     frame_idx = 0
-    window = f"CPD: {video_path.name} (q to quit)"
+    window = f"Real-time Landmarks: {video_path.name} (q to quit)"
+    
+    print(f"Starting real-time landmark visualization...")
+    print(f"Press 'q' to quit, 'p' to pause/resume")
+    
+    paused = False
+    
     while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
+        if not paused:
+            ok, frame = cap.read()
+            if not ok:
+                break
 
-        # Overlay frame index
-        cv2.putText(frame, f"frame {frame_idx}", (12, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+            # Overlay frame index
+            cv2.putText(frame, f"frame {frame_idx}", (12, 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
-        # Timestamp in ms for MediaPipe (use actual stream position)
-        ts_ms = int(cap.get(cv2.CAP_PROP_POS_MSEC))
-        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB,
-                          data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            # Timestamp in ms for MediaPipe (use actual stream position)
+            ts_ms = int(cap.get(cv2.CAP_PROP_POS_MSEC))
+            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB,
+                            data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-        # Face landmarks (selected subset drawn)
-        face_res = face_model.detect_for_video(mp_img, ts_ms)
-        if face_res and face_res.face_landmarks:
-            draw_face_points(frame, face_res.face_landmarks, color=(255, 200, 0))  # yellow-ish
+            # Face landmarks (selected subset drawn)
+            face_res = face_model.detect_for_video(mp_img, ts_ms)
+            if face_res and face_res.face_landmarks:
+                draw_face_points(frame, face_res.face_landmarks, color=(255, 200, 0))  # yellow-ish
 
-        # Pose landmarks (upper-body)
-        pose_res = pose_model.detect_for_video(mp_img, ts_ms)
-        if pose_res and pose_res.pose_landmarks:
-            draw_pose_points_and_edges(frame, pose_res.pose_landmarks,
-                                       point_color=(0, 255, 0), edge_color=(0, 180, 0))
-            
-        # Hand landmarks
-        hand_res = hand_model.detect_for_video(mp_img, ts_ms)
-        draw_hand_points(frame, hand_res)
+            # Pose landmarks (upper-body)
+            pose_res = pose_model.detect_for_video(mp_img, ts_ms)
+            if pose_res and pose_res.pose_landmarks:
+                draw_pose_points_and_edges(frame, pose_res.pose_landmarks,
+                                         point_color=(0, 255, 0), edge_color=(0, 180, 0))
+                
+            # Hand landmarks
+            hand_res = hand_model.detect_for_video(mp_img, ts_ms)
+            draw_hand_points(frame, hand_res)
 
-
-        # Highlight CP frames
-        if frame_idx in cp_indices:
-            draw_cpd_banner(frame)
+            frame_idx += 1
 
         # Show
         cv2.imshow(window, frame)
-        key = cv2.waitKey(wait_ms) & 0xFF
+        key = cv2.waitKey(wait_ms if not paused else 1) & 0xFF
+        
         if key == ord('q'):
             break
-
-        frame_idx += 1
+        elif key == ord('p'):
+            paused = not paused
+            print(f"{'Paused' if paused else 'Resumed'}")
 
     cap.release()
     cv2.destroyAllWindows()
@@ -300,6 +264,8 @@ def main():
     face_model.close()
     pose_model.close()
     hand_model.close()
+    
+    print(f"Processing complete. Processed {frame_idx} frames.")
 
 
 if __name__ == "__main__":

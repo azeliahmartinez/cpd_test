@@ -193,10 +193,8 @@ def build_features_from_raw_folder(raw_folder: Path, n_frames: int) -> Optional[
     print(f"     ✓ feature length = {feat.size} (per-frame={per_frame_dim}, frames={n_frames})")
     return feat
 
-
-# --------------------------
 # Dataset assembly
-# --------------------------
+
 def make_split_features(
     split_df: pd.DataFrame, vidmap: Dict[str, Path], n_frames: int, out_root: Path, tag: str
 ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
@@ -239,10 +237,6 @@ def make_split_features(
     y = np.array(y_list, dtype=int)
     return X, y, used_clipids
 
-
-# --------------------------
-# Main
-# --------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--daisee-root", required=True, help="Folder containing DAiSEE (with DataSet/ and Labels/)")
@@ -315,7 +309,7 @@ def main():
     eval_split("Validation", Xva, yva)
     eval_split("Test", Xte, yte)
 
-    # ---------------- Save ----------------
+    # ------ Save -------
     models_dir = out_root / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
     model_path = models_dir / "engagement_rf.joblib"
