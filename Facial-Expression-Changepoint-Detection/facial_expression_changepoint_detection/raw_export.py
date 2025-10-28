@@ -12,7 +12,7 @@ import mediapipe as mp
 from .landmarks import new_landmarker, preprocess_for_mediapipe, _68_INDICES
 from .pose_extractor import _POSE_OPTS
 from .hand_extractor import _HAND_OPTS
-
+from .video_utils import get_video_fps
 
 # BlazePose indices we care about
 # Left arm: shoulder(11), elbow(13), wrist(15)
@@ -66,7 +66,8 @@ def export_raw_landmarks_from_frames(
     dst_dir.mkdir(parents=True, exist_ok=True)
 
     # strictly increasing timestamps for Tasks API
-    ts_ms = [int(i * 33) for i in range(len(frames_bgr))]
+    fps = max(get_video_fps(video_path), 1.0)
+    ts_ms = [int(round(1000.0 * idx / fps)) for idx in frame_indices]
 
     # Prepare accumulators
     face_header: Optional[List[str]] = None
@@ -100,11 +101,11 @@ def export_raw_landmarks_from_frames(
 
                 if face_header is None:
                     face_header = (
-                        ["video", "frame_index"] +
+                        ["video", "frame_index", "time_sec"] +
                         [f"f{j}_x" for j in range(68)] +
                         [f"f{j}_y" for j in range(68)]
                     )
-                face_rows.append([video_path.name, frame_indices[k]] +
+                face_rows.append([video_path.name, frame_indices[k], round(ts_ms[k] / 1000.0, 3)] +
                                  xy[:, 0].astype(float).tolist() +
                                  xy[:, 1].astype(float).tolist())
 
@@ -129,7 +130,7 @@ def export_raw_landmarks_from_frames(
                 t_x,  t_y,  t_v  = pick(px, TORSO),    pick(py, TORSO),    pick(pv, TORSO)
 
                 if pose_header is None:
-                    pose_header = ["video", "frame_index"] \
+                    pose_header = ["video", "frame_index", "time_sec"] \
                         + [f"la{j}_x" for j in range(len(LEFT_ARM))] \
                         + [f"ra{j}_x" for j in range(len(RIGHT_ARM))] \
                         + [f"t{j}_x"  for j in range(len(TORSO))] \
@@ -141,7 +142,7 @@ def export_raw_landmarks_from_frames(
                         + [f"t{j}_vis"  for j in range(len(TORSO))]
 
                 pose_rows.append(
-                    [video_path.name, frame_indices[k]]
+                    [video_path.name, frame_indices[k], round(ts_ms[k] / 1000.0, 3)]
                     + la_x + ra_x + t_x
                     + la_y + ra_y + t_y
                     + la_v + ra_v + t_v
@@ -176,13 +177,13 @@ def export_raw_landmarks_from_frames(
 
                 if hands_header is None:
                     hands_header = (
-                        ["video", "frame_index"]
+                        ["video", "frame_index", "time_sec"]
                         + [f"lh{j}_x" for j in range(21)] + [f"rh{j}_x" for j in range(21)]
                         + [f"lh{j}_y" for j in range(21)] + [f"rh{j}_y" for j in range(21)]
                     )
 
                 hands_rows.append(
-                    [video_path.name, frame_indices[k]]
+                    [video_path.name, frame_indices[k], round(ts_ms[k] / 1000.0, 3)]
                     + left[:, 0].astype(float).tolist() + right[:, 0].astype(float).tolist()
                     + left[:, 1].astype(float).tolist() + right[:, 1].astype(float).tolist()
                 )

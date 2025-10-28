@@ -5,6 +5,9 @@ from typing import Generator
 import cv2 as cv
 import numpy as np
 
+import cv2
+from pathlib import Path
+
 
 def get_frames(vid_path: Path) -> Generator[tuple[np.ndarray, float], None, int]:
     """
@@ -51,3 +54,10 @@ def save_frames(
             cv.imwrite(filename=filename, img=frame)
     finally:
         os.chdir(cwd)
+
+def get_video_fps(vid_path: Path) -> float:
+    cap = cv2.VideoCapture(str(vid_path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+    cap.release()
+    # Fallback to 30 if FPS couldn’t be read
+    return fps if fps > 0 else 30.0

@@ -13,6 +13,7 @@ from .pose_extractor import PoseSignalExtractor
 from .hand_extractor import HandSignalExtractor
 
 from .video_utils import get_frames_at_indices, save_frames
+from .video_utils import get_video_fps
 
 # Face region labels in the same order as _68_INDICES
 _FACE_REGION_NAMES = [
@@ -84,9 +85,15 @@ class VideoProcessor:
         self._pose_indices_sorted: Optional[List[int]] = None
         self._region_col_indices: Optional[Dict[str, List[int]]] = None  # face+pose+hand
 
+        # video properties
+        self.fps: float | None = None
+
     # ---------- internal helpers ----------
 
     def _ensure_filtered_signal(self) -> None:
+        if self.fps is None:
+            self.fps = get_video_fps(self.vid_path)
+
         if self.filtered_signal is not None:
             return
 
@@ -233,6 +240,12 @@ class VideoProcessor:
     def _fmt_scores(self, values: list[float], decimals: int = 4) -> str:
         return "[" + "|".join(f"{v:.{decimals}f}" for v in values) + "]"
 
+    def _fmt_times(self, indices: list[int], decimals: int = 2) -> str:
+        """Format seconds for the selected frame indices."""
+        fps = max(self.fps or 0.0, 1.0)
+        secs = [idx / fps for idx in indices]
+        return "[" + "|".join(f"{t:.{decimals}f}" for t in secs) + "]"
+
     def _fmt_xy_pairs(self, xy_flat: np.ndarray) -> str:
         pairs = []
         it = iter(xy_flat.tolist())
@@ -291,6 +304,7 @@ class VideoProcessor:
     ) -> None:
         idx_list = changepoints
         idx_str = "[" + "|".join(str(cp) for cp in idx_list) + "]"
+        time_str = self._fmt_times(idx_list)
 
         suffix = f"_{frame_count}"
 
@@ -298,6 +312,7 @@ class VideoProcessor:
             "video": self.vid_path.name,
             "frame_count": frame_count,
             "frame_indices": idx_str,
+            f"frame_times{suffix}": time_str,
             f"global{suffix}": (
                 self._fmt_scores(change_scores_global or [], decimals)
                 if change_scores_global is not None else ""
@@ -336,6 +351,7 @@ class VideoProcessor:
 
         fieldnames = [
             "video", "frame_count", "frame_indices",
+            f"frame_times{suffix}",
             f"global{suffix}", 
             "start_face_xy", *[f"{n}{suffix}" for n in _FACE_REGION_NAMES],
             "start_pose_xy",  *[f"{n}{suffix}" for n in _POSE_REGION_NAMES],
