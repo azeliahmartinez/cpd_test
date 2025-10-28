@@ -32,5 +32,7 @@ pip-wheel-metadata/
 
 # ---- Project-specific ----
 # Ignore outputs from CPD runs (frames, raw_landmarks, changepoints, etc.)
-output/
-output/**/*.csv
+Facial-Expression-Changepoint-Detection\output_ml\raw_landmarks
+Facial-Expression-Changepoint-Detection\output_ml\extracted_frames
+Facial-Expression-Changepoint-Detection\predictions
+

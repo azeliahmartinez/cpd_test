@@ -1,23 +1,5 @@
 """
-Train a RandomForest on DAiSEE Engagement (0–3) using ONLY pixel coordinates
-exported by your pipeline (face-68, upper-body subset, hands) from N frames.
-
-Usage (PowerShell from repo root):
-  python train_engagement.py --daisee-root "D:\\Desktop\\cpd\\DAiSEE" --n-frames 5 --out-dir "output_ml" --limit 10
-
-It will:
-  - Walk DAiSEE/DataSet/{Train,Validation,Test} to find videos
-  - Use Labels/*.csv to read Engagement labels (0–3)
-  - For each video, run your VideoProcessor once to create raw_landmarks CSVs
-  - Build a feature vector by concatenating ALL pixel coordinates across the selected frames:
-      per-frame dims (expected):
-        face_68   = 68 x + 68 y              = 136
-        upper_body= (LA+RA+TORSO) (x,y,vis)  = 30   (10 pts * 3 channels)
-        hands     = (L 21 + R 21) * (x,y)    = 84
-      total per frame = 136 + 30 + 84 = 250
-      total per sample (N frames) = 250 * N
-  - Train RandomForest on Train, evaluate on Validation+Test
-  - Save model to <out-dir>/models/engagement_rf.joblib
+Train a RandomForest on DAiSEE Engagement (0-3) using facial landmarks
 """
 
 from __future__ import annotations
@@ -31,27 +13,23 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-# ---- Import your existing modules ----
+# Import your modules
 from facial_expression_changepoint_detection.video_processing import VideoProcessor
 from facial_expression_changepoint_detection.landmarks import LandmarksSignalExtractor
 from facial_expression_changepoint_detection.pose_extractor import PoseSignalExtractor
 from facial_expression_changepoint_detection.hand_extractor import HandSignalExtractor
+from facial_expression_changepoint_detection.raw_export import export_raw_landmarks_from_frames
 
+# Expected dimensions
+EXPECTED_FACE_COLS = 136
+EXPECTED_POSE_COLS = 30
+EXPECTED_HANDS_COLS = 84
 
-# Expected per-frame dimensions (see raw_export.py headers)
-EXPECTED_FACE_COLS  = 136  # 68 x's + 68 y's
-EXPECTED_POSE_COLS  = 30   # (LA 3 + RA 3 + TORSO 4) * (x,y,vis) = 10*3
-EXPECTED_HANDS_COLS = 84   # (L21 + R21) * (x,y) = 42*2
-
-
-# ---------------------------
-# Helpers: DAiSEE file system
-# ---------------------------
 def find_videos(root: Path) -> Dict[str, Path]:
-    """Return { '5000441001.avi': full_path, ... } scanning DAiSEE/DataSet/*/*/*/*.avi"""
-    vidmap: Dict[str, Path] = {}
+    """Find all DAiSEE video files"""
+    vidmap = {}
     data_root = root / "DataSet"
     for dirpath, _, files in os.walk(data_root):
         for fn in files:
@@ -59,274 +37,257 @@ def find_videos(root: Path) -> Dict[str, Path]:
                 vidmap[fn] = Path(dirpath) / fn
     return vidmap
 
-
 def load_split_labels(root: Path) -> Dict[str, pd.DataFrame]:
+    """Load train and validation labels"""
     lbl_root = root / "Labels"
     splits = {
         "Train": lbl_root / "TrainLabels.csv",
         "Validation": lbl_root / "ValidationLabels.csv",
-        "Test": lbl_root / "TestLabels.csv",
     }
     out = {}
     for k, p in splits.items():
-        if not p.exists():
-            raise FileNotFoundError(f"Missing label file: {p}")
         df = pd.read_csv(p)
-        if "ClipID" not in df.columns or "Engagement" not in df.columns:
-            raise RuntimeError(f"{p} missing required columns (ClipID, Engagement)")
         out[k] = df[["ClipID", "Engagement"]].copy()
     return out
 
-
-# ---------------------------------------------------
-# Use your pipeline to generate raw_landmarks CSVs
-# ---------------------------------------------------
 def ensure_raw_landmarks(vid_path: Path, n_frames: int, out_root: Path) -> Optional[Path]:
-    """
-    Runs your VideoProcessor ONCE to produce raw_landmarks CSVs for this video.
-    Returns the directory containing the three CSVs:
-      out_root/raw_landmarks/{n}_frames/<clipid>/
-    """
-    out_dir = out_root
-    print(f"🟦 Extracting: {vid_path}  → out_root={out_root}")
-    vp = VideoProcessor(
-        vid_path=vid_path,
-        signal_extractors=[LandmarksSignalExtractor(), PoseSignalExtractor(), HandSignalExtractor()],
-    )
+    """Extract landmarks for a video"""
+    clip_id = vid_path.stem
+    raw_dir = out_root / "raw_landmarks" / f"{n_frames}_frames" / clip_id
+    frames_dir = out_root / "extracted_frames" / f"{n_frames}_frames" / clip_id
+    
+    # Skip if already processed
+    if raw_dir.exists():
+        face_files = list(raw_dir.glob(f"*_face68_*f.csv"))
+        if face_files:
+            print(f"  Using cached: {clip_id}")
+            return raw_dir
 
+    print(f"  Processing: {clip_id}")
+    
     try:
-        vp.select_frames_and_save_data(
-            frame_count=n_frames,
-            output_dir=out_dir,
-            csv_path=out_dir / "changepoints.csv",
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize VideoProcessor
+        vp = VideoProcessor(
+            vid_path=vid_path,
+            signal_extractors=[
+                LandmarksSignalExtractor(),
+                PoseSignalExtractor(),
+                HandSignalExtractor()
+            ],
         )
+        
+        # Extract frames
+        frames, changepoints = vp.select_frames(frame_count=n_frames)
+        
+        # Save frames as images
+        from facial_expression_changepoint_detection.video_utils import save_frames
+        frame_filenames = [f"frame_{idx:04d}.png" for idx in changepoints]
+        save_frames(output_dir=frames_dir, frames=frames, filenames=frame_filenames)
+        
+        # Generate landmarks
+        export_raw_landmarks_from_frames(
+            video_path=vid_path,
+            frames_bgr=frames,
+            frame_indices=changepoints,
+            out_root=out_root,
+            n_frames_label=n_frames
+        )
+        
+        return raw_dir
+        
     except Exception as e:
-        print(f"⚠️  Skipping {vid_path.name} due to extractor error: {e}")
+        print(f"  Error: {e}")
         return None
 
-    raw_folder = out_dir / "raw_landmarks" / f"{n_frames}_frames" / vid_path.stem
-    print(f"     ↳ Expected raw folder: {raw_folder}")
-    return raw_folder if raw_folder.exists() else None
-
-
-# ---------------------------------------------------
-# Feature builder (pixel coordinates only) — FIXED LENGTH
-# ---------------------------------------------------
-def _read_face_csv(p: Path) -> Optional[pd.DataFrame]:
-    files = list(p.glob(f"{p.name}_face68_*f.csv"))
-    return pd.read_csv(files[0]) if files else None
-
-
-def _read_pose_csv(p: Path) -> Optional[pd.DataFrame]:
-    files = list(p.glob(f"{p.name}_upper_body_*f.csv"))
-    return pd.read_csv(files[0]) if files else None
-
-
-def _read_hands_csv(p: Path) -> Optional[pd.DataFrame]:
-    files = list(p.glob(f"{p.name}_hands_*f.csv"))
-    return pd.read_csv(files[0]) if files else None
-
-
-def _row_vals(df: Optional[pd.DataFrame], i: int, expected_len: int) -> np.ndarray:
-    """Return a 1D array of length expected_len. If df missing/short, pad with zeros."""
-    if df is None or i >= len(df):
-        return np.zeros((expected_len,), dtype=float)
-    vals = df.iloc[i].drop(labels=["video", "frame_index"]).to_numpy(dtype=float)
-    if vals.size < expected_len:
-        out = np.zeros((expected_len,), dtype=float)
-        out[:vals.size] = vals
-        return out
-    elif vals.size > expected_len:
-        return vals[:expected_len]
-    return vals
-
-
-def build_features_from_raw_folder(raw_folder: Path, n_frames: int) -> Optional[np.ndarray]:
-    """Concatenate fixed-length [face(136) + pose(30) + hands(84)] for each of n_frames."""
-    if not raw_folder or not raw_folder.exists():
-        print("     ❌ raw_folder missing")
-        return None
-
-    df_face = _read_face_csv(raw_folder)
-    df_pose = _read_pose_csv(raw_folder)
-    df_hands = _read_hands_csv(raw_folder)
-
-    # Debug: report which CSVs exist
-    print(f"     CSVs: face={'OK' if df_face is not None else 'MISSING'}, "
-          f"pose={'OK' if df_pose is not None else 'MISSING'}, "
-          f"hands={'OK' if df_hands is not None else 'MISSING'}")
-
-    # Face is mandatory for stable geometry (we enforce fixed dims anyway)
-    if df_face is None:
-        return None
-
-    # Sort by frame_index to align time
-    key = "frame_index"
-    df_face = df_face.sort_values(key)
-    if df_pose is not None:  df_pose  = df_pose.sort_values(key)
-    if df_hands is not None: df_hands = df_hands.sort_values(key)
-
-    # We’ll use the number of face rows as our reference for available rows
-    num_rows = len(df_face)
-    rows: List[np.ndarray] = []
-
+def build_features_from_csvs(raw_dir: Path, n_frames: int) -> np.ndarray:
+    """Build features from the generated CSV files (OLD WORKING VERSION)"""
+    print("  Building features from CSVs...")
+    
+    def read_csv(p: Path, pattern: str) -> Optional[pd.DataFrame]:
+        files = list(p.glob(pattern))
+        return pd.read_csv(files[0]) if files else None
+    
+    # Read generated CSV files
+    df_face = read_csv(raw_dir, f"*_face68_*f.csv")
+    df_pose = read_csv(raw_dir, f"*_upper_body_*f.csv") 
+    df_hands = read_csv(raw_dir, f"*_hands_*f.csv")
+    
+    print(f"  CSVs found - Face: {'Yes' if df_face is not None else 'No'}, "
+          f"Pose: {'Yes' if df_pose is not None else 'No'}, "
+          f"Hands: {'Yes' if df_hands is not None else 'No'}")
+    
+    # Get the actual number of rows from each dataframe
+    num_face_rows = len(df_face) if df_face is not None else 0
+    num_pose_rows = len(df_pose) if df_pose is not None else 0
+    num_hands_rows = len(df_hands) if df_hands is not None else 0
+    
+    print(f"  Row counts - Face: {num_face_rows}, Pose: {num_pose_rows}, Hands: {num_hands_rows}")
+    
+    # Use the maximum number of rows available
+    num_rows = max(num_face_rows, num_pose_rows, num_hands_rows)
+    
+    # Use training-style feature building
+    rows = []
+    
     for i in range(num_rows):
-        fvals = _row_vals(df_face,  i, EXPECTED_FACE_COLS)
-        pvals = _row_vals(df_pose,  i, EXPECTED_POSE_COLS)
-        hvals = _row_vals(df_hands, i, EXPECTED_HANDS_COLS)
-        rows.append(np.concatenate([fvals, pvals, hvals], axis=0))
-
-    if not rows:
-        print("     ❌ no rows assembled from CSVs")
-        return None
-
-    # Pad/trim to exactly n_frames rows
-    per_frame_dim = rows[0].size
+        # Face features
+        if df_face is not None and i < num_face_rows:
+            fvals = df_face.iloc[i].drop(["video", "frame_index"]).to_numpy()
+        else:
+            fvals = np.zeros(EXPECTED_FACE_COLS)
+        
+        if len(fvals) > EXPECTED_FACE_COLS:
+            fvals = fvals[:EXPECTED_FACE_COLS]
+        elif len(fvals) < EXPECTED_FACE_COLS:
+            fvals = np.pad(fvals, (0, EXPECTED_FACE_COLS - len(fvals)))
+        
+        # Pose features  
+        if df_pose is not None and i < num_pose_rows:
+            pvals = df_pose.iloc[i].drop(["video", "frame_index"]).to_numpy()
+        else:
+            pvals = np.zeros(EXPECTED_POSE_COLS)
+            
+        if len(pvals) > EXPECTED_POSE_COLS:
+            pvals = pvals[:EXPECTED_POSE_COLS]
+        elif len(pvals) < EXPECTED_POSE_COLS:
+            pvals = np.pad(pvals, (0, EXPECTED_POSE_COLS - len(pvals)))
+        
+        # Hand features
+        if df_hands is not None and i < num_hands_rows:
+            hvals = df_hands.iloc[i].drop(["video", "frame_index"]).to_numpy()
+        else:
+            hvals = np.zeros(EXPECTED_HANDS_COLS)
+            
+        if len(hvals) > EXPECTED_HANDS_COLS:
+            hvals = hvals[:EXPECTED_HANDS_COLS]
+        elif len(hvals) < EXPECTED_HANDS_COLS:
+            hvals = np.pad(hvals, (0, EXPECTED_HANDS_COLS - len(hvals)))
+        
+        rows.append(np.concatenate([fvals, pvals, hvals]))
+    
+    # Pad/trim to exactly n_frames
     if len(rows) < n_frames:
-        pad_vec = np.zeros((per_frame_dim,), dtype=float)
+        pad_vec = np.zeros(EXPECTED_FACE_COLS + EXPECTED_POSE_COLS + EXPECTED_HANDS_COLS)
         while len(rows) < n_frames:
             rows.append(pad_vec.copy())
     elif len(rows) > n_frames:
         rows = rows[:n_frames]
+    
+    features = np.concatenate(rows)
+    print(f"  Features built: {features.shape}")
+    return features
 
-    feat = np.concatenate(rows, axis=0)  # shape (n_frames * per_frame_dim,)
-    print(f"     ✓ feature length = {feat.size} (per-frame={per_frame_dim}, frames={n_frames})")
-    return feat
-
-# Dataset assembly
-
-def make_split_features(
-    split_df: pd.DataFrame, vidmap: Dict[str, Path], n_frames: int, out_root: Path, tag: str
-) -> Tuple[np.ndarray, np.ndarray, List[str]]:
-    X_list, y_list, used_clipids = [], [], []
-    kept, skipped = 0, 0
+def make_split_features(split_df: pd.DataFrame, vidmap: Dict[str, Path], n_frames: int, out_root: Path, tag: str, max_samples: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Build features for a split"""
+    X_list, y_list = [], []
+    kept = 0
+    
+    # Shuffle and take samples
+    split_df = split_df.sample(frac=1, random_state=42).head(max_samples)
 
     for _, row in split_df.iterrows():
         clipid = str(row["ClipID"]).strip()
-        label = int(row["Engagement"]) if not pd.isna(row["Engagement"]) else None
-        if label is None:
-            skipped += 1
-            continue
-
+        label = int(row["Engagement"])
+        
         clipid_ext = clipid if clipid.lower().endswith(".avi") else f"{clipid}.avi"
         vid_path = vidmap.get(clipid_ext)
         if vid_path is None:
-            print(f"   [{tag}] ❌ Missing video for ClipID={clipid}")
-            skipped += 1
+            print(f"  [{tag}] Missing video: {clipid}")
             continue
 
-        raw_folder = ensure_raw_landmarks(vid_path, n_frames=n_frames, out_root=out_root)
+        raw_folder = ensure_raw_landmarks(vid_path, n_frames, out_root)
         if raw_folder is None:
-            print(f"   [{tag}] ❌ No raw folder for {vid_path.name}")
-            skipped += 1
+            print(f"  [{tag}] No raw folder: {vid_path.name}")
             continue
 
-        feat = build_features_from_raw_folder(raw_folder, n_frames=n_frames)
-        if feat is None:
-            print(f"   [{tag}] ❌ Failed to build features for {vid_path.name}")
-            skipped += 1
-            continue
+        feat = build_features_from_csvs(raw_folder, n_frames)
+        if feat is not None:
+            X_list.append(feat)
+            y_list.append(label)
+            kept += 1
+            print(f"  [{tag}] {kept}/{max_samples} - {clipid}")
 
-        X_list.append(feat)
-        y_list.append(label)
-        used_clipids.append(vid_path.name)
-        kept += 1
-
-    print(f"   [{tag}] Kept {kept} videos, skipped {skipped}")
-    X = np.vstack(X_list) if X_list else np.empty((0, EXPECTED_FACE_COLS + EXPECTED_POSE_COLS + EXPECTED_HANDS_COLS))
-    y = np.array(y_list, dtype=int)
-    return X, y, used_clipids
+    print(f"  [{tag}] Completed: {kept} samples")
+    
+    if not X_list:
+        return np.array([]), np.array([])
+    
+    X = np.vstack(X_list)  # This creates proper 2D array
+    y = np.array(y_list)
+    return X, y
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--daisee-root", required=True, help="Folder containing DAiSEE (with DataSet/ and Labels/)")
-    ap.add_argument("--n-frames", type=int, default=5, help="How many frames to use per video (default: 5)")
-    ap.add_argument("--out-dir", default="output_ml", help="Where to store raw_landmarks and models")
-    ap.add_argument("--limit", type=int, default=None, help="Limit number of videos per split for testing")
+    ap.add_argument("--daisee-root", required=True, help="DAiSEE dataset root")
+    ap.add_argument("--n-frames", type=int, default=5, help="Frames per video")
+    ap.add_argument("--out-dir", default="output_ml", help="Output directory")
+    ap.add_argument("--train-samples", type=int, default=30, help="Training samples")
+    ap.add_argument("--val-samples", type=int, default=10, help="Validation samples")
     args = ap.parse_args()
 
-    daisee_root = Path(args.daisee_root).resolve()
-    out_root = Path(args.out_dir).resolve()
+    # Setup
+    daisee_root = Path(args.daisee_root)
+    out_root = Path(args.out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"📂 DAiSEE root: {daisee_root}")
-    print(f"📦 Output root: {out_root}")
-
-    print("🔎 Scanning DAiSEE videos…")
+    print("📂 Loading DAiSEE dataset...")
     vidmap = find_videos(daisee_root)
-    print(f"   Found {len(vidmap)} videos")
-
-    print("📄 Loading labels…")
     splits = load_split_labels(daisee_root)
 
-    # Optional dataset size limit
-    if args.limit:
-        for split_name, df in splits.items():
-            splits[split_name] = df.sample(frac=1, random_state=42).head(args.limit)
-            print(f"🔹 Limited {split_name} to {len(splits[split_name])} rows")
+    # Build features
+    print("🧩 Building training features...")
+    X_train, y_train = make_split_features(splits["Train"], vidmap, args.n_frames, out_root, "TRAIN", args.train_samples)
+    
+    print("🧩 Building validation features...") 
+    X_val, y_val = make_split_features(splits["Validation"], vidmap, args.n_frames, out_root, "VALID", args.val_samples)
 
-    # Extract features per split
-    print("🧩 Building Train features…")
-    Xtr, ytr, _ = make_split_features(splits["Train"], vidmap, args.n_frames, out_root, tag="Train")
-    print(f"   Train: X={Xtr.shape}, y={ytr.shape}, label counts={np.bincount(ytr, minlength=4) if ytr.size else '[]'}")
+    print(f"✅ Training: {X_train.shape}, Validation: {X_val.shape}")
 
-    if Xtr.shape[0] == 0:
-        print("\n❌ No training samples were built. Common causes:")
-        print("   • Your extractor didn’t produce raw CSVs (face_68/upper_body/hands).")
-        print(f"   • Check one video’s folder under: {out_root / 'raw_landmarks' / f'{args.n_frames}_frames'}")
-        print("   • Ensure MediaPipe models exist and video paths are correct.")
-        print("   • Try --limit 2 first to debug, and watch the per-video logs above.")
+    # Check if we have any data
+    if X_train.shape[0] == 0:
+        print("❌ No training samples were built!")
         return
 
-    print("🧩 Building Validation features…")
-    Xva, yva, _ = make_split_features(splits["Validation"], vidmap, args.n_frames, out_root, tag="Valid")
-    print(f"   Validation: X={Xva.shape}, y={yva.shape}, label counts={np.bincount(yva, minlength=4) if yva.size else '[]'}")
-
-    print("🧩 Building Test features…")
-    Xte, yte, _ = make_split_features(splits["Test"], vidmap, args.n_frames, out_root, tag="Test")
-    print(f"   Test: X={Xte.shape}, y={yte.shape}, label counts={np.bincount(yte, minlength=4) if yte.size else '[]'}")
-
-    # ---------------- Train ----------------
-    print("\n🚀 Training RandomForest (pixel features only)…")
+    # Train model
+    print("🚀 Training RandomForest...")
     clf = RandomForestClassifier(
-        n_estimators=600,
-        class_weight="balanced_subsample",
+        n_estimators=100, 
+        random_state=42, 
         n_jobs=-1,
-        random_state=42,
+        class_weight='balanced'
     )
-    clf.fit(Xtr, ytr)
+    clf.fit(X_train, y_train)
 
-    # ---------------- Eval ----------------
-    def eval_split(name, X, y):
-        if X.shape[0] == 0:
-            print(f"{name}: no samples")
-            return
-        pred = clf.predict(X)
-        print(f"\n📊 {name} Accuracy: {accuracy_score(y, pred):.4f}")
-        print(classification_report(y, pred, digits=4))
-        print("Confusion Matrix:\n", confusion_matrix(y, pred))
+    # Evaluate
+    train_acc = accuracy_score(y_train, clf.predict(X_train))
+    print(f"📊 Train Accuracy: {train_acc:.3f}")
+    
+    if X_val.shape[0] > 0:
+        val_acc = accuracy_score(y_val, clf.predict(X_val))
+        print(f"📊 Validation Accuracy: {val_acc:.3f}")
 
-    eval_split("Validation", Xva, yva)
-    eval_split("Test", Xte, yte)
-
-    # ------ Save -------
+    # Save model
     models_dir = out_root / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
-    model_path = models_dir / "engagement_rf.joblib"
-    joblib.dump(clf, model_path)
-
+    
+    joblib.dump(clf, models_dir / "engagement_rf.joblib")
+    
     meta = {
         "n_frames": args.n_frames,
-        "per_frame_dim": EXPECTED_FACE_COLS + EXPECTED_POSE_COLS + EXPECTED_HANDS_COLS,
-        "feature_dim": int(Xtr.shape[1]) if Xtr.shape[0] else 0,
-        "labels": {"0": "Disengaged", "1": "Low", "2": "Engaged", "3": "Highly Engaged"},
+        "train_samples": len(X_train),
+        "val_samples": len(X_val),
+        "train_accuracy": float(train_acc),
+        "val_accuracy": float(val_acc) if X_val.shape[0] > 0 else 0,
+        "labels": {"0": "Disengaged", "1": "Low", "2": "Engaged", "3": "Highly Engaged"}
     }
-    with (models_dir / "engagement_rf_meta.json").open("w") as f:
+    
+    with open(models_dir / "engagement_rf_meta.json", "w") as f:
         json.dump(meta, f, indent=2)
 
-    print(f"\n✅ Model saved to {model_path}")
-    print("Done.")
-
+    print("✅ Model saved!")
 
 if __name__ == "__main__":
     main()

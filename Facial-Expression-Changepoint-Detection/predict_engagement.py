@@ -22,17 +22,46 @@ EXPECTED_FACE_COLS  = 136
 EXPECTED_POSE_COLS  = 30
 EXPECTED_HANDS_COLS = 84
 
-def get_video_path(video_name: str) -> Path:
-    """Get absolute path to video"""
-    base_dir = Path("D:/Desktop/cpd/PARTICIPANTS_CLIPS")
-    video_path = base_dir / video_name
+def get_video_path(video_input: str) -> Path:
+    """Get path to video - handles both relative and absolute paths"""
+    video_path = Path(video_input)
     
-    if not video_path.exists():
-        print(f"❌ Video not found: {video_path}")
-        raise FileNotFoundError(f"Video not found: {video_name}")
+    # If it's already an absolute path that exists, use it
+    if video_path.exists():
+        print(f"✅ Video found: {video_path}")
+        return video_path
     
-    print(f"✅ Video found: {video_path}")
-    return video_path
+    # Try different possible locations
+    possible_paths = [
+        # Relative to current directory (Facial-Expression-Changepoint-Detection)
+        video_path,
+        Path("../PARTICIPANTS_CLIPS") / video_path.name,
+        Path("../../PARTICIPANTS_CLIPS") / video_path.name,
+        
+        # Absolute paths
+        Path("D:/Desktop/cpd/cpd_test/PARTICIPANTS_CLIPS") / video_path.name,  # ← NEW CORRECT PATH
+        Path("D:/Desktop/cpd/cpd_test") / video_path,
+    ]
+    
+    for path in possible_paths:
+        if path.exists():
+            print(f"✅ Video found: {path}")
+            return path
+    
+    # If not found, show available videos
+    print("❌ Video not found. Searching for available videos...")
+    search_dirs = [
+        Path("../PARTICIPANTS_CLIPS"),
+        Path("D:/Desktop/cpd/cpd_test/PARTICIPANTS_CLIPS")
+    ]
+    
+    for search_dir in search_dirs:
+        if search_dir.exists():
+            print(f"📁 Videos in {search_dir}:")
+            for vid_file in search_dir.glob("*.mp4"):
+                print(f"   - {vid_file.name}")
+    
+    raise FileNotFoundError(f"Video not found: {video_input}")
 
 def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Path) -> Dict[str, Path]:
     """
@@ -120,27 +149,48 @@ def build_features_from_csvs(raw_dir: Path, n_frames: int) -> np.ndarray:
           f"Pose: {'Yes' if df_pose is not None else 'No'}, "
           f"Hands: {'Yes' if df_hands is not None else 'No'}")
     
+    # Get the actual number of rows from each dataframe
+    num_face_rows = len(df_face) if df_face is not None else 0
+    num_pose_rows = len(df_pose) if df_pose is not None else 0
+    num_hands_rows = len(df_hands) if df_hands is not None else 0
+    
+    print(f"📏 Row counts - Face: {num_face_rows}, Pose: {num_pose_rows}, Hands: {num_hands_rows}")
+    
+    # Use the maximum number of rows available
+    num_rows = max(num_face_rows, num_pose_rows, num_hands_rows)
+    
     # Use training-style feature building
     rows = []
-    num_rows = len(df_face) if df_face is not None else 0
     
     for i in range(num_rows):
         # Face features
-        fvals = df_face.iloc[i].drop(["video", "frame_index"]).to_numpy() if df_face is not None else np.zeros(EXPECTED_FACE_COLS)
+        if df_face is not None and i < num_face_rows:
+            fvals = df_face.iloc[i].drop(["video", "frame_index"]).to_numpy()
+        else:
+            fvals = np.zeros(EXPECTED_FACE_COLS)
+        
         if len(fvals) > EXPECTED_FACE_COLS:
             fvals = fvals[:EXPECTED_FACE_COLS]
         elif len(fvals) < EXPECTED_FACE_COLS:
             fvals = np.pad(fvals, (0, EXPECTED_FACE_COLS - len(fvals)))
         
         # Pose features  
-        pvals = df_pose.iloc[i].drop(["video", "frame_index"]).to_numpy() if df_pose is not None else np.zeros(EXPECTED_POSE_COLS)
+        if df_pose is not None and i < num_pose_rows:
+            pvals = df_pose.iloc[i].drop(["video", "frame_index"]).to_numpy()
+        else:
+            pvals = np.zeros(EXPECTED_POSE_COLS)
+            
         if len(pvals) > EXPECTED_POSE_COLS:
             pvals = pvals[:EXPECTED_POSE_COLS]
         elif len(pvals) < EXPECTED_POSE_COLS:
             pvals = np.pad(pvals, (0, EXPECTED_POSE_COLS - len(pvals)))
         
         # Hand features
-        hvals = df_hands.iloc[i].drop(["video", "frame_index"]).to_numpy() if df_hands is not None else np.zeros(EXPECTED_HANDS_COLS)
+        if df_hands is not None and i < num_hands_rows:
+            hvals = df_hands.iloc[i].drop(["video", "frame_index"]).to_numpy()
+        else:
+            hvals = np.zeros(EXPECTED_HANDS_COLS)
+            
         if len(hvals) > EXPECTED_HANDS_COLS:
             hvals = hvals[:EXPECTED_HANDS_COLS]
         elif len(hvals) < EXPECTED_HANDS_COLS:
