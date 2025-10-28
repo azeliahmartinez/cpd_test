@@ -1,16 +1,16 @@
-"""
-ENHANCED PREDICT: Predict engagement (0–3) and generate all outputs (CSV, frames, landmarks)
-"""
-
+# predict_engagement.py
 from __future__ import annotations
-import argparse
-import json
-from pathlib import Path
-import numpy as np
-import joblib
-import pandas as pd
-from typing import Dict, List, Optional
 
+import argparse
+from pathlib import Path
+import json
+import sys
+
+import joblib
+import numpy as np
+import pandas as pd
+
+# ---------- Your pipeline modules ----------
 from facial_expression_changepoint_detection.video_processing import VideoProcessor
 from facial_expression_changepoint_detection.landmarks import LandmarksSignalExtractor
 from facial_expression_changepoint_detection.pose_extractor import PoseSignalExtractor
@@ -22,46 +22,17 @@ EXPECTED_FACE_COLS  = 136
 EXPECTED_POSE_COLS  = 30
 EXPECTED_HANDS_COLS = 84
 
-def get_video_path(video_input: str) -> Path:
-    """Get path to video - handles both relative and absolute paths"""
-    video_path = Path(video_input)
+def get_video_path(video_name: str) -> Path:
+    """Get absolute path to video"""
+    base_dir = Path("D:/Desktop/cpd/PARTICIPANTS_CLIPS")
+    video_path = base_dir / video_name
     
-    # If it's already an absolute path that exists, use it
-    if video_path.exists():
-        print(f"✅ Video found: {video_path}")
-        return video_path
+    if not video_path.exists():
+        print(f"❌ Video not found: {video_path}")
+        raise FileNotFoundError(f"Video not found: {video_name}")
     
-    # Try different possible locations
-    possible_paths = [
-        # Relative to current directory (Facial-Expression-Changepoint-Detection)
-        video_path,
-        Path("../PARTICIPANTS_CLIPS") / video_path.name,
-        Path("../../PARTICIPANTS_CLIPS") / video_path.name,
-        
-        # Absolute paths
-        Path("D:/Desktop/cpd/cpd_test/PARTICIPANTS_CLIPS") / video_path.name,  # ← NEW CORRECT PATH
-        Path("D:/Desktop/cpd/cpd_test") / video_path,
-    ]
-    
-    for path in possible_paths:
-        if path.exists():
-            print(f"✅ Video found: {path}")
-            return path
-    
-    # If not found, show available videos
-    print("❌ Video not found. Searching for available videos...")
-    search_dirs = [
-        Path("../PARTICIPANTS_CLIPS"),
-        Path("D:/Desktop/cpd/cpd_test/PARTICIPANTS_CLIPS")
-    ]
-    
-    for search_dir in search_dirs:
-        if search_dir.exists():
-            print(f"📁 Videos in {search_dir}:")
-            for vid_file in search_dir.glob("*.mp4"):
-                print(f"   - {vid_file.name}")
-    
-    raise FileNotFoundError(f"Video not found: {video_input}")
+    print(f"✅ Video found: {video_path}")
+    return video_path
 
 def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Path) -> Dict[str, Path]:
     """
@@ -133,64 +104,40 @@ def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Pat
         raise
 
 def build_features_from_csvs(raw_dir: Path, n_frames: int) -> np.ndarray:
-    """Build features from the generated CSV files (same as training pipeline)"""
-    print("🔨 Building features from CSVs...")
-    
-    def read_csv(p: Path, pattern: str) -> Optional[pd.DataFrame]:
-        files = list(p.glob(pattern))
-        return pd.read_csv(files[0]) if files else None
-    
-    # Read generated CSV files
-    df_face = read_csv(raw_dir, f"*_face68_*f.csv")
-    df_pose = read_csv(raw_dir, f"*_upper_body_*f.csv") 
-    df_hands = read_csv(raw_dir, f"*_hands_*f.csv")
-    
-    print(f"📊 CSVs found - Face: {'Yes' if df_face is not None else 'No'}, "
+    """
+    Build a single fixed-length feature vector:
+      concat over time (n_frames) of [face(136) + pose(30) + hands(84)]
+    Pads with zeros or trims to exactly n_frames rows.
+    """
+    df_face = _read_first_csv(raw_dir, "*_face68_*f.csv")
+    df_pose = _read_first_csv(raw_dir, "*_upper_body_*f.csv")
+    df_hands = _read_first_csv(raw_dir, "*_hands_*f.csv")
+
+    print(f"📊 CSVs found – Face: {'Yes' if df_face is not None else 'No'}, "
           f"Pose: {'Yes' if df_pose is not None else 'No'}, "
           f"Hands: {'Yes' if df_hands is not None else 'No'}")
     
-    # Get the actual number of rows from each dataframe
-    num_face_rows = len(df_face) if df_face is not None else 0
-    num_pose_rows = len(df_pose) if df_pose is not None else 0
-    num_hands_rows = len(df_hands) if df_hands is not None else 0
-    
-    print(f"📏 Row counts - Face: {num_face_rows}, Pose: {num_pose_rows}, Hands: {num_hands_rows}")
-    
-    # Use the maximum number of rows available
-    num_rows = max(num_face_rows, num_pose_rows, num_hands_rows)
-    
     # Use training-style feature building
     rows = []
+    num_rows = len(df_face) if df_face is not None else 0
     
     for i in range(num_rows):
         # Face features
-        if df_face is not None and i < num_face_rows:
-            fvals = df_face.iloc[i].drop(["video", "frame_index"]).to_numpy()
-        else:
-            fvals = np.zeros(EXPECTED_FACE_COLS)
-        
+        fvals = df_face.iloc[i].drop(["video", "frame_index"]).to_numpy() if df_face is not None else np.zeros(EXPECTED_FACE_COLS)
         if len(fvals) > EXPECTED_FACE_COLS:
             fvals = fvals[:EXPECTED_FACE_COLS]
         elif len(fvals) < EXPECTED_FACE_COLS:
             fvals = np.pad(fvals, (0, EXPECTED_FACE_COLS - len(fvals)))
         
         # Pose features  
-        if df_pose is not None and i < num_pose_rows:
-            pvals = df_pose.iloc[i].drop(["video", "frame_index"]).to_numpy()
-        else:
-            pvals = np.zeros(EXPECTED_POSE_COLS)
-            
+        pvals = df_pose.iloc[i].drop(["video", "frame_index"]).to_numpy() if df_pose is not None else np.zeros(EXPECTED_POSE_COLS)
         if len(pvals) > EXPECTED_POSE_COLS:
             pvals = pvals[:EXPECTED_POSE_COLS]
         elif len(pvals) < EXPECTED_POSE_COLS:
             pvals = np.pad(pvals, (0, EXPECTED_POSE_COLS - len(pvals)))
         
         # Hand features
-        if df_hands is not None and i < num_hands_rows:
-            hvals = df_hands.iloc[i].drop(["video", "frame_index"]).to_numpy()
-        else:
-            hvals = np.zeros(EXPECTED_HANDS_COLS)
-            
+        hvals = df_hands.iloc[i].drop(["video", "frame_index"]).to_numpy() if df_hands is not None else np.zeros(EXPECTED_HANDS_COLS)
         if len(hvals) > EXPECTED_HANDS_COLS:
             hvals = hvals[:EXPECTED_HANDS_COLS]
         elif len(hvals) < EXPECTED_HANDS_COLS:
@@ -200,179 +147,186 @@ def build_features_from_csvs(raw_dir: Path, n_frames: int) -> np.ndarray:
     
     # Pad/trim to exactly n_frames
     if len(rows) < n_frames:
-        pad_vec = np.zeros(EXPECTED_FACE_COLS + EXPECTED_POSE_COLS + EXPECTED_HANDS_COLS)
+        pad_vec = np.zeros((per_frame_dim,), dtype=float)
         while len(rows) < n_frames:
             rows.append(pad_vec.copy())
     elif len(rows) > n_frames:
         rows = rows[:n_frames]
-    
-    features = np.concatenate(rows)
-    print(f"✅ Features built: {features.shape}")
-    return features
 
-def save_prediction_summary(vid_path: Path, prediction: int, probabilities: np.ndarray, 
-                          outputs: Dict, out_dir: Path, meta: Dict):
-    """Save comprehensive prediction summary"""
-    summary_file = out_dir / f"prediction_summary_{vid_path.stem}.txt"
-    
-    with open(summary_file, 'w', encoding='utf-8') as f:
-        f.write("PREDICTION SUMMARY REPORT\n")
-        f.write("=" * 50 + "\n\n")
-        
-        f.write("VIDEO INFORMATION:\n")
-        f.write(f"  Video: {vid_path.name}\n")
-        f.write(f"  Path: {vid_path}\n\n")
-        
-        f.write("PREDICTION RESULTS:\n")
-        labels = meta.get("labels", {"0": "Disengaged", "1": "Low", "2": "Engaged", "3": "Highly Engaged"})
-        f.write(f"  Predicted Engagement: {prediction} - {labels.get(str(prediction), 'Unknown')}\n")
-        f.write("  Class Probabilities:\n")
-        for i, prob in enumerate(probabilities):
-            label_name = labels.get(str(i), f"Class_{i}")
-            f.write(f"    {i} ({label_name}): {prob:.4f} ({prob*100:.2f}%)\n")
-        f.write("\n")
-        
-        f.write("GENERATED OUTPUTS:\n")
-        f.write(f"  Raw Landmarks Directory: {outputs['raw_dir']}\n")
-        f.write(f"  Extracted Frames Directory: {outputs['frames_dir']}\n")
-        f.write("  CSV Files Generated:\n")
-        for file_type, file_path in outputs.get('csv_files', {}).items():
-            f.write(f"    - {file_type}: {file_path.name}\n")
-        f.write(f"  Change Points (frame indices): {outputs.get('changepoints', [])}\n")
-        f.write(f"  Frames Extracted: {len(outputs.get('frames', []))}\n")
-        f.write(f"  Feature Vector Dimension: {outputs['features'].shape}\n")
-    
-    print(f"📄 Summary saved: {summary_file}")
+    feat = np.concatenate(rows, axis=0)
+    print(f"✅ Features built: shape=({feat.size},) "
+          f"(per-frame={per_frame_dim}, frames={n_frames})")
+    return feat
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--video", required=True, help="Video filename (e.g., Brodeth_Charlize_clip_01.mp4)")
-    ap.add_argument("--model-dir", default="output_ml/models")
-    ap.add_argument("--n-frames", type=int, default=5)
-    ap.add_argument("--out-dir", default="predictions")
-    ap.add_argument("--generate-outputs", action="store_true", default=True, 
-                   help="Generate CSV files and extracted frames")
-    args = ap.parse_args()
 
-    # Load model
-    model_dir = Path(args.model_dir)
-    try:
-        clf = joblib.load(model_dir / "engagement_rf.joblib")
-        print(f"✅ Model loaded. Classes: {clf.classes_}")
-    except Exception as e:
-        print(f"❌ Failed to load model: {e}")
-        return
-    
-    # Load metadata
-    meta_path = model_dir / "engagement_rf_meta.json"
-    if meta_path.exists():
-        meta = json.loads(meta_path.read_text())
-    else:
-        meta = {"labels": {"0": "Disengaged", "1": "Low", "2": "Engaged", "3": "Highly Engaged"}}
-
-    # Get video path
-    try:
-        vid_path = get_video_path(args.video)
-    except FileNotFoundError as e:
-        print(e)
-        return
-
-    # Create output directory
-    out_root = Path(args.out_dir)
+# ---------------------------------------------------------------------
+# Video → frames → CSVs → features (same as your existing pipeline)
+# ---------------------------------------------------------------------
+def generate_outputs_from_video(vid_path: Path, out_root: Path, n_frames: int):
+    """
+    Returns dict with features, and paths to written CSVs/frames for inspection.
+    """
+    out_root = out_root.resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n🎯 STARTING PREDICTION PIPELINE")
-    print(f"📹 Video: {vid_path.name}")
-    print(f"📁 Output directory: {out_root}")
-    print(f"🔄 Generating outputs: {args.generate_outputs}")
-    print("=" * 50)
+    stem = vid_path.stem
+    raw_dir = out_root / "raw_landmarks" / f"{n_frames}_frames" / stem
+    frames_dir = out_root / "extracted_frames" / f"{n_frames}_frames" / stem
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    frames_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        if args.generate_outputs:
-            # Enhanced pipeline: Generate all outputs
-            outputs = ensure_raw_landmarks_and_frames(vid_path, args.n_frames, out_root)
-            features = outputs["features"]
-        else:
-            # Simple pipeline: Just extract features
-            features = build_features_direct(vid_path, args.n_frames)
-            outputs = {"features": features}
-        
-        # Ensure correct feature dimension
-        expected_dim = args.n_frames * 250
-        if features.shape[0] != expected_dim:
-            print(f"🔧 Adjusting features to match expected dimension")
-            if features.shape[0] < expected_dim:
-                features = np.pad(features, (0, expected_dim - features.shape[0]))
-            else:
-                features = features[:expected_dim]
-        
-        # Make prediction
-        prediction = clf.predict(features.reshape(1, -1))[0]
-        probabilities = clf.predict_proba(features.reshape(1, -1))[0]
-        
-        # Display results
-        labels = meta.get("labels", {"0": "Disengaged", "1": "Low", "2": "Engaged", "3": "Highly Engaged"})
-        
-        print(f"\n" + "="*50)
-        print(f"🎯 PREDICTION RESULTS")
-        print(f"="*50)
-        print(f"📹 Video: {vid_path.name}")
-        print(f"🔮 Predicted engagement: {prediction} - {labels.get(str(prediction), 'Unknown')}")
-        print(f"📊 Class probabilities:")
-        
-        for i, prob in enumerate(probabilities):
-            label_name = labels.get(str(i), f"Class_{i}")
-            print(f"   {i} ({label_name}): {prob:.3f} ({prob*100:.1f}%)")
-        
-        # Save comprehensive summary
-        outputs["features"] = features  # Store final features
-        save_prediction_summary(vid_path, prediction, probabilities, outputs, out_root, meta)
-        
-        print(f"\n✅ PREDICTION COMPLETE")
-        print(f"📄 Summary report generated")
-        if args.generate_outputs:
-            print(f"📊 Landmark CSVs generated")
-            print(f"🖼️  Frame images extracted")
-        print(f"="*50)
-            
-    except Exception as e:
-        print(f"❌ Prediction failed: {e}")
-        import traceback
-        traceback.print_exc()
+    print("📁 Output directories:")
+    print("   - Raw landmarks:", raw_dir)
+    print("   - Extracted frames:", frames_dir)
 
-# Fallback direct feature extraction (if CSV generation fails)
-def build_features_direct(vid_path: Path, n_frames: int) -> np.ndarray:
-    """Fallback: Direct feature extraction without CSV generation"""
-    print("🔄 Using direct feature extraction...")
-    
-    extractors = {
-        "face": LandmarksSignalExtractor(),
-        "pose": PoseSignalExtractor(),
-        "hands": HandSignalExtractor()
+    # 1) Select frames using your VideoProcessor
+    print("🎬 Extracting key frames…")
+    vp = VideoProcessor(
+        vid_path=vid_path,
+        signal_extractors=[LandmarksSignalExtractor(),
+                           PoseSignalExtractor(),
+                           HandSignalExtractor()],
+    )
+    frames_bgr, changepoints = vp.select_frames(frame_count=n_frames)
+    print(f"✅ Extracted {len(frames_bgr)} frames at indices: {changepoints}")
+
+    # 2) Save frames
+    print("💾 Saving frame images…")
+    frame_files = [f"frame_{idx:04d}.png" for idx in changepoints]
+    save_frames(output_dir=frames_dir, frames=frames_bgr, filenames=frame_files)
+    print(f"✅ Saved {len(frame_files)} frame images")
+
+    # 3) Export raw landmark CSVs from those frames
+    print("📊 Generating landmark CSVs…")
+    written = export_raw_landmarks_from_frames(
+        video_path=vid_path,
+        frames_bgr=frames_bgr,
+        frame_indices=changepoints,
+        out_root=out_root,
+        n_frames_label=n_frames,
+    )
+    for k, p in written.items():
+        print(f"   - {k}: {Path(p).name}")
+
+    # 4) Build features (same shape/ordering used by training)
+    features = build_features_from_csvs(raw_dir, n_frames)
+
+    return {
+        "features": features,
+        "raw_dir": raw_dir,
+        "frames_dir": frames_dir,
+        "csv_files": written,
+        "changepoints": changepoints,
+        "frames": frames_bgr,
     }
-    
-    signals = {}
-    for name, extractor in extractors.items():
-        try:
-            signal = extractor.extract_signal(vid_path)
-            signals[name] = signal if signal is not None else np.zeros((100, 
-                EXPECTED_FACE_COLS if name == "face" else EXPECTED_POSE_COLS if name == "pose" else EXPECTED_HANDS_COLS))
-        except Exception as e:
-            print(f"⚠️  {name} extractor failed: {e}")
-            signals[name] = np.zeros((100, 
-                EXPECTED_FACE_COLS if name == "face" else EXPECTED_POSE_COLS if name == "pose" else EXPECTED_HANDS_COLS))
-    
-    min_frames = min(s.shape[0] for s in signals.values())
-    combined = np.concatenate([s[:min_frames] for s in signals.values()], axis=1)
-    
-    if combined.shape[0] >= n_frames:
-        indices = np.linspace(0, combined.shape[0]-1, n_frames, dtype=int)
-        selected = combined[indices]
+
+
+# ---------------------------------------------------------------------
+# Prediction utils (ROBUST: use clf.classes_ for labels/probabilities)
+# ---------------------------------------------------------------------
+def load_model_from_args(model_path: str | None, model_dir: str | None) -> tuple:
+    if model_path:
+        mp = Path(model_path)
     else:
-        selected = np.zeros((n_frames, combined.shape[1]))
-        selected[:combined.shape[0]] = combined
-    
-    return selected.flatten()
+        if not model_dir:
+            raise ValueError("Provide --model or --model-dir")
+        # default filename used by training script
+        mp = Path(model_dir) / "engagement_rf.joblib"
+    if not mp.exists():
+        raise FileNotFoundError(f"Model not found: {mp}")
+    clf = joblib.load(mp)
+    meta_path = mp.with_name("engagement_rf_meta.json")
+    meta = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+        except Exception:
+            meta = {}
+    return clf, meta, mp
+
+
+def save_summary(out_dir: Path, video_name: str, pred_label: int,
+                 probs: np.ndarray, classes: np.ndarray):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    label_name = LABEL_NAMES.get(int(pred_label), str(pred_label))
+    lines = []
+    lines.append("🎯 PREDICTION RESULTS")
+    lines.append("====================================")
+    lines.append(f"Video: {video_name}")
+    lines.append(f"Predicted engagement: {pred_label} – {label_name}")
+    lines.append("")
+    lines.append("📊 Class probabilities:")
+    for c, p in zip(classes, probs):
+        lines.append(f"  {int(c)} ({LABEL_NAMES.get(int(c), str(c))}): {p:.3f}")
+    lines.append("")
+
+    summary_path = out_dir / f"prediction_summary_{Path(video_name).stem}.txt"
+    summary_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"📝 Summary saved → {summary_path}")
+
+
+# ---------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(
+        description="Predict engagement for a video using a trained model."
+    )
+    ap.add_argument("--video", required=True, help="Path to input video file")
+    ap.add_argument("--model", default=None, help="Path to .joblib model file")
+    ap.add_argument("--model-dir", default=None, help="Directory containing model file")
+    ap.add_argument("--n-frames", type=int, default=5, help="Number of frames to use")
+    ap.add_argument("--out-dir", default="pred_output", help="Output directory root")
+    args = ap.parse_args()
+
+    vid_path = Path(args.video).resolve()
+    if not vid_path.exists():
+        print(f"❌ Video not found: {vid_path}")
+        sys.exit(1)
+
+    # Load model (and optional meta)
+    clf, meta, model_path = load_model_from_args(args.model, args.model_dir)
+    print(f"📦 Loaded model: {model_path}")
+    if meta:
+        print(f"ℹ️  Meta: {json.dumps(meta, indent=2)}")
+
+    # Generate features (and write CSVs/frames so you can inspect)
+    out_root = Path(args.out_dir)
+    gen = generate_outputs_from_video(vid_path=vid_path, out_root=out_root,
+                                      n_frames=args.n_frames)
+
+    # Predict (ROBUST to subset of classes)
+    features = gen["features"].reshape(1, -1)
+    if hasattr(clf, "predict_proba"):
+        probs = clf.predict_proba(features)[0]  # shape = (len(classes),)
+    else:
+        # Fallback if model has no predict_proba (e.g., SVM without prob=True)
+        # Use a pseudo-probability from decision_function
+        pred = clf.predict(features)[0]
+        classes = getattr(clf, "classes_", np.array([pred]))
+        probs = np.zeros((len(classes),), dtype=float)
+        probs[np.where(classes == pred)[0][0]] = 1.0
+
+    classes = getattr(clf, "classes_", np.arange(len(probs), dtype=int))
+    pred_label = int(classes[np.argmax(probs)])
+
+    # Print nicely
+    print("\n🎯 PREDICTION RESULTS")
+    print("====================================")
+    print(f"Video: {vid_path.name}")
+    print(f"Predicted engagement: {pred_label} – {LABEL_NAMES.get(pred_label, 'Unknown')}")
+    print("📊 Class probabilities:")
+    for c, p in zip(classes, probs):
+        print(f"  {int(c)} ({LABEL_NAMES.get(int(c), str(c))}): {p:.3f}")
+
+    # Save a summary alongside artifacts
+    save_summary(out_root, vid_path.name, pred_label, probs, classes)
+
+    print("\n✅ PREDICTION COMPLETE")
+    print("Summary report generated")
+    print("Landmark CSVs generated")
+    print("Frame images extracted")
+
 
 if __name__ == "__main__":
     main()
