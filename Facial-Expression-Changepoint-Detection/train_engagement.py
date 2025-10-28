@@ -22,6 +22,10 @@ from facial_expression_changepoint_detection.pose_extractor import PoseSignalExt
 from facial_expression_changepoint_detection.hand_extractor import HandSignalExtractor
 from facial_expression_changepoint_detection.raw_export import export_raw_landmarks_from_frames
 
+# >>> ADDED for CNN preprocessing <<<
+from sklearn.preprocessing import StandardScaler
+# <<< ADDED for CNN preprocessing <<<
+
 # Expected dimensions
 EXPECTED_FACE_COLS = 136
 EXPECTED_POSE_COLS = 30
@@ -251,7 +255,7 @@ def main():
         print("❌ No training samples were built!")
         return
 
-    # Train model
+    # --------------------------- Random Forest (unchanged) ---------------------------
     print("🚀 Training RandomForest...")
     clf = RandomForestClassifier(
         n_estimators=100, 
@@ -261,15 +265,18 @@ def main():
     )
     clf.fit(X_train, y_train)
 
-    # Evaluate
+    # Evaluate RF
     train_acc = accuracy_score(y_train, clf.predict(X_train))
-    print(f"📊 Train Accuracy: {train_acc:.3f}")
+    print(f"📊 RF Train Accuracy: {train_acc:.3f}")
     
     if X_val.shape[0] > 0:
         val_acc = accuracy_score(y_val, clf.predict(X_val))
-        print(f"📊 Validation Accuracy: {val_acc:.3f}")
+        print(f"📊 RF Validation Accuracy: {val_acc:.3f}")
+        print("📄 RF Validation report:")
+        print(classification_report(y_val, clf.predict(X_val), digits=4, zero_division=0))
+        print("RF Confusion Matrix:\n", confusion_matrix(y_val, clf.predict(X_val)))
 
-    # Save model
+    # Save RF
     models_dir = out_root / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
     
@@ -277,17 +284,102 @@ def main():
     
     meta = {
         "n_frames": args.n_frames,
-        "train_samples": len(X_train),
-        "val_samples": len(X_val),
+        "train_samples": int(X_train.shape[0]),
+        "val_samples": int(X_val.shape[0]),
         "train_accuracy": float(train_acc),
-        "val_accuracy": float(val_acc) if X_val.shape[0] > 0 else 0,
+        "val_accuracy": float(val_acc) if X_val.shape[0] > 0 else 0.0,
         "labels": {"0": "Disengaged", "1": "Low", "2": "Engaged", "3": "Highly Engaged"}
     }
     
     with open(models_dir / "engagement_rf_meta.json", "w") as f:
         json.dump(meta, f, indent=2)
 
-    print("✅ Model saved!")
+    print("✅ RF model saved!")
+
+    # ================================
+    # >>> ADDED: 1D CNN COMPARISON <<<
+    # ================================
+    try:
+        import tensorflow as tf
+        from tensorflow.keras import layers, models, callbacks
+
+        print("\n🧪 Training 1D CNN (sequence over frames)…")
+
+        # ---- Prepare data for CNN ----
+        # Replace NaNs with 0; scale using train-only stats
+        scaler = StandardScaler(with_mean=True, with_std=True)
+        Xtr_cnn = scaler.fit_transform(np.nan_to_num(X_train, nan=0.0, posinf=0.0, neginf=0.0))
+        Xva_cnn = scaler.transform(np.nan_to_num(X_val,   nan=0.0, posinf=0.0, neginf=0.0)) if X_val.size else X_val
+
+        n_frames = int(args.n_frames)
+        per_frame_dim = EXPECTED_FACE_COLS + EXPECTED_POSE_COLS + EXPECTED_HANDS_COLS  # 250
+
+        def reshape_time(x):
+            if x.size == 0: return x
+            # x is (N, n_frames*per_frame_dim)
+            return x.reshape(-1, n_frames, per_frame_dim)
+
+        Xtr_seq = reshape_time(Xtr_cnn)
+        Xva_seq = reshape_time(Xva_cnn)
+
+        num_classes = 4
+        input_shape = (n_frames, per_frame_dim)
+
+        # ---- Define a small 1D CNN ----
+        model = models.Sequential([
+            layers.Input(shape=input_shape),
+            layers.Conv1D(64, kernel_size=3, padding="same", activation="relu"),
+            layers.Dropout(0.2),
+            layers.Conv1D(64, kernel_size=3, padding="same", activation="relu"),
+            layers.GlobalAveragePooling1D(),
+            layers.Dense(64, activation="relu"),
+            layers.Dropout(0.2),
+            layers.Dense(num_classes, activation="softmax"),
+        ])
+        model.compile(optimizer="adam",
+                      loss="sparse_categorical_crossentropy",
+                      metrics=["accuracy"])
+
+        cbs = [callbacks.EarlyStopping(monitor="val_accuracy", patience=3, restore_best_weights=True)]
+
+        # Train CNN (use validation split if provided, else 10% split from train)
+        if Xva_seq.size:
+            history = model.fit(Xtr_seq, y_train, epochs=15, batch_size=16,
+                                validation_data=(Xva_seq, y_val),
+                                callbacks=cbs, verbose=2)
+        else:
+            history = model.fit(Xtr_seq, y_train, epochs=15, batch_size=16,
+                                validation_split=0.1, callbacks=cbs, verbose=2)
+
+        # ---- Evaluate & print nicely ----
+        def eval_keras(split_name, Xs, ys):
+            if Xs.size == 0:
+                print(f"{split_name}: no samples")
+                return 0.0
+            loss, acc = model.evaluate(Xs, ys, verbose=0)
+            yhat = np.argmax(model.predict(Xs, verbose=0), axis=1)
+            print(f"\n📊 CNN {split_name} Accuracy: {acc:.4f}")
+            print(classification_report(ys, yhat, digits=4, zero_division=0))
+            print("Confusion Matrix:\n", confusion_matrix(ys, yhat))
+            return float(acc)
+
+        _ = eval_keras("Validation", Xva_seq, y_val)
+
+        # ---- Save CNN model + metrics ----
+        cnn_path = models_dir / "engagement_cnn.keras"
+        model.save(cnn_path)
+        metrics_dir = out_root / "metrics"
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        # store last validation accuracy seen
+        with open(metrics_dir / "cnn_metrics.json", "w") as f:
+            json.dump({"val_accuracy": float(model.history.history.get("val_accuracy", [0])[-1]) if "val_accuracy" in model.history.history else None}, f, indent=2)
+
+        print(f"\n✅ CNN model saved to {cnn_path}")
+
+    except Exception as e:
+        print("\n⚠️  Skipping CNN training:", e)
+        print("   • To enable, install TensorFlow (`pip install tensorflow`) and ensure enough RAM/CPU.")
+        print("   • The RF pipeline above is already complete and saved.")
 
 if __name__ == "__main__":
     main()

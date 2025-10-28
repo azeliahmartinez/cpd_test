@@ -16,11 +16,30 @@ from facial_expression_changepoint_detection.landmarks import LandmarksSignalExt
 from facial_expression_changepoint_detection.pose_extractor import PoseSignalExtractor
 from facial_expression_changepoint_detection.hand_extractor import HandSignalExtractor
 from facial_expression_changepoint_detection.raw_export import export_raw_landmarks_from_frames
+from facial_expression_changepoint_detection.video_utils import save_frames
 
 # Expected per-frame dimensions
 EXPECTED_FACE_COLS  = 136
 EXPECTED_POSE_COLS  = 30
 EXPECTED_HANDS_COLS = 84
+
+# Calculate per_frame_dim constant
+per_frame_dim = EXPECTED_FACE_COLS + EXPECTED_POSE_COLS + EXPECTED_HANDS_COLS
+
+# Label names for engagement levels
+LABEL_NAMES = {
+    0: "Disengaged",
+    1: "Low", 
+    2: "Engaged",
+    3: "Highly Engaged"
+}
+
+def _read_first_csv(directory: Path, pattern: str) -> pd.DataFrame | None:
+    """Helper to read first matching CSV file in directory"""
+    files = list(directory.glob(pattern))
+    if not files:
+        return None
+    return pd.read_csv(files[0])
 
 def get_video_path(video_name: str) -> Path:
     """Get absolute path to video"""
@@ -68,7 +87,6 @@ def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Pat
         
         # Save frames as images
         print("💾 Saving frame images...")
-        from facial_expression_changepoint_detection.video_utils import save_frames
         frame_filenames = [f"frame_{idx:04d}.png" for idx in changepoints]
         save_frames(output_dir=frames_dir, frames=frames, filenames=frame_filenames)
         print(f"✅ Saved {len(frames)} frame images")

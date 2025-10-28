@@ -5,3 +5,7 @@ __pycache__
 raw_landmarks/
 extracted_frames/
 predictions/
+output_ml/
+output_ml_smalltest/
+predictions/
+changepoints.csv
