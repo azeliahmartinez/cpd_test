@@ -14,13 +14,22 @@
     <main class="ef-content analysis-grid">
       <section class="video-card card">
         <h2 id="videoTitle">Video Title (placeholder)</h2>
-        <p class="muted"><span id="videoDuration">45:30</span> • <span id="videoDate">Uploaded Mar 15, 2025</span></p>
+        <p class="muted">
+          <span id="videoDate">Uploaded --/--/----</span>
+        </p>
+
         <div class="video-placeholder">
           <div class="video-fake"><i data-feather="play-circle"></i></div>
         </div>
+
         <div class="btn-row">
-          <button class="btn btn-outline" id="reanalyzeBtn">Re-analyze Video</button>
-          <button class="btn btn-outline" id="downloadBtn">Download Video</button>
+          <button class="btn btn-outline" id="extractedFramesBtn"><i data-feather="image"></i> Download Extracted Frames</button>
+          <button class="btn btn-outline" id="downloadCSVBtn"><i data-feather="download"></i> Download CSVs Data</button>
+        </div>
+
+        <div class="card mt frame-selection">
+          <h3>Extracted Frames</h3>
+          <div class="frames-grid" id="framesGrid"></div>
         </div>
 
         <div class="card mt">
@@ -36,27 +45,24 @@
       <section class="right-col">
         <div class="card">
           <h3>Engagement Overview</h3>
-          <div class="score" id="engagementScore">78%</div>
-          <p class="muted">Overall Engagement Score</p>
+          <div class="score-row">
+            <div class="score" id="engagementScore">3</div>
+            <p class="muted">Highly Engaged</p>
+          </div>
         </div>
 
         <div class="card">
-          <h3>Engagement Trend Over Time</h3>
-          <canvas id="trendChart" width="600" height="240" aria-label="Trend"></canvas>
-        </div>
-
-        <div class="card">
-          <h3>Engagement State Distribution</h3>
-          <canvas id="donutChart" width="600" height="260" aria-label="Distribution"></canvas>
+          <h3>Engagement Level Probabilities</h3>
+          <canvas id="donutChart" width="600" height="240" aria-label="Trend"></canvas>
         </div>
 
         <div class="card">
           <h3>Key Engagement Moments</h3>
           <ul id="momentsList" class="moments">
-            <li><time>10:20</time> Student gaze shift to notes — deep focus <a href="#" class="jump">Jump to Video</a></li>
-            <li><time>20:45</time> Phone glance — quick recovery <a href="#" class="jump">Jump to Video</a></li>
-            <li><time>30:10</time> Active note-taking — high engagement <a href="#" class="jump">Jump to Video</a></li>
-            <li><time>40:05</time> Fidgeting — attention dip <a href="#" class="jump">Jump to Video</a></li>
+            <li><time>10:20</time> <a href="#" class="jump">Jump to Video</a></li>
+            <li><time>20:45</time> <a href="#" class="jump">Jump to Video</a></li>
+            <li><time>30:10</time> <a href="#" class="jump">Jump to Video</a></li>
+            <li><time>40:05</time> <a href="#" class="jump">Jump to Video</a></li>
           </ul>
         </div>
       </section>

@@ -25,8 +25,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const status = document.getElementById('uploadStatus');
   const progressBar = document.getElementById('progressBar');
 
+  const dateEl  = document.getElementById('videoDate');
+  const titleEl = document.getElementById('videoTitle');
+
+  const storedDate  = localStorage.getItem('uploadDate');
+  const storedTitle = localStorage.getItem('videoTitle');
+  
+  if (storedDate && dateEl)  {
+    dateEl.textContent  = `Uploaded ${storedDate}`;
+  }
+  
+  if (storedTitle && titleEl) {
+    titleEl.textContent = storedTitle;
+  }
+  
   if (dz && fileInput) {
-    dz.addEventListener('click', () => fileInput.click());
     dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
     dz.addEventListener('drop', e => {
@@ -47,20 +60,37 @@ document.addEventListener('DOMContentLoaded', () => {
   if (analyzeBtn) {
     analyzeBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
+
+      // progress animation 
       if (progressBar) {
         progressBar.style.width = '20%';
-        setTimeout(()=> progressBar.style.width='60%', 400);
-        setTimeout(()=> progressBar.style.width='100%', 900);
+        setTimeout(() => progressBar.style.width = '60%', 350);
+        setTimeout(() => progressBar.style.width = '100%', 800);
       }
-      await fetch('/api/upload', { method: 'POST' });
-      setTimeout(()=> window.location.href = '/analysis.html', 1100);
+
+      // build multipart/form-data
+      const fd = new FormData();
+      fd.append('video', selectedFile);
+
+      // upload to backend
+      const res = await fetch('/api/upload', { method: 'POST', body: fd }).then(r => r.json());
+
+      if (res.ok) {
+        // store for analysis page
+        if (res.uploadDate) localStorage.setItem('uploadDate', res.uploadDate);
+        if (res.filename)   localStorage.setItem('videoTitle', res.filename);
+        if (res.url)        localStorage.setItem('videoUrl', res.url);
+      }
+
+      // go to analysis page
+      window.location.href = '/analysis.html';
     });
   }
 
   // analysis page buttons
-  const reanalyzeBtn = document.getElementById('reanalyzeBtn');
-  if (reanalyzeBtn) {
-    reanalyzeBtn.addEventListener('click', async () => {
+  const extractedFramesBtn = document.getElementById('extractedFramesBtn');
+  if (extractedFramesBtn) {
+    extractedFramesBtn.addEventListener('click', async () => {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -71,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('videoTitle').textContent = res.data.title;
         document.getElementById('videoDuration').textContent = res.data.duration;
         document.getElementById('videoDate').textContent = res.data.date;
-        document.getElementById('engagementScore').textContent = `${res.data.score}%`;
+        document.getElementById('engagementScore').textContent = `${res.data.engagement}%`;
 
         const recoList = document.getElementById('recoList');
         recoList.innerHTML = '';
@@ -88,46 +118,18 @@ document.addEventListener('DOMContentLoaded', () => {
         moments.innerHTML = '';
         res.data.keyMoments.forEach(m => {
           const li = document.createElement('li');
-          li.innerHTML = `<time>${m.t}</time> ${m.note} <a href="#" class="jump">Jump to Video</a>`;
+          li.innerHTML = `<time>${m.t}</time> <a href="#" class="jump">Jump to Video</a>`;
           moments.appendChild(li);
         });
       }
     });
   }
 
-  const downloadBtn = document.getElementById('downloadBtn');
+  const downloadBtn = document.getElementById('downloadCSVBtn');
   if (downloadBtn) {
     downloadBtn.addEventListener('click', () => alert('Download stub. Connect to backend to enable.'));
   }
 });
-
-function drawTrend(points = []) {
-  const c = document.getElementById('trendChart');
-  if (!c) return;
-  const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, c.width, c.height);
-
-  ctx.strokeStyle = '#DDE5DD';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(40, 10); ctx.lineTo(40, c.height - 30); ctx.lineTo(c.width - 10, c.height - 30);
-  ctx.stroke();
-
-  if (!points.length) return;
-
-  const max = 100, min = 0;
-  const plotW = c.width - 60, plotH = c.height - 50;
-  ctx.beginPath();
-  ctx.strokeStyle = '#12865C';
-  ctx.lineWidth = 2;
-
-  points.forEach((v, i) => {
-    const x = 40 + (i * (plotW / (points.length - 1 || 1)));
-    const y = 10 + (1 - (v - min) / (max - min)) * plotH;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-}
 
 function drawDonut(states = { Focused: 40, Engaged: 30, Neutral: 20, Distracted: 10 }) {
   const c = document.getElementById('donutChart');
