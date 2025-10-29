@@ -51,10 +51,18 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
 // ---- Analyze endpoint (calls your Python) ----
 app.post('/api/analyze', async (req, res) => {
+  let responseSent = false; // Prevent double response
+
+  const sendResponse = (data) => {
+    if (responseSent) return;
+    responseSent = true;
+    res.json(data);
+  };
+
   try {
     const savedName = (req.body && req.body.savedName) || null;
     if (!savedName) {
-      return res.status(400).json({ ok: false, error: 'savedName is required' });
+      return sendResponse({ ok: false, error: 'savedName is required' });
     }
 
     const nFrames = Number(req.body.nFrames || 5);
@@ -81,17 +89,17 @@ app.post('/api/analyze', async (req, res) => {
     // Check if files exist
     if (!fs.existsSync(videoPath)) {
       console.log(`[ERROR] Video not found: ${videoPath}`);
-      return res.status(400).json({ ok: false, error: 'Video file not found' });
+      return sendResponse({ ok: false, error: 'Video file not found' });
     }
 
     if (!fs.existsSync(scriptPath)) {
       console.log(`[ERROR] Python script not found: ${scriptPath}`);
-      return res.status(500).json({ ok: false, error: 'Python analysis script not found' });
+      return sendResponse({ ok: false, error: 'Python analysis script not found' });
     }
 
     if (!fs.existsSync(modelDir)) {
       console.log(`[ERROR] Model directory not found: ${modelDir}`);
-      return res.status(500).json({ ok: false, error: 'Model directory not found' });
+      return sendResponse({ ok: false, error: 'Model directory not found' });
     }
 
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
@@ -104,14 +112,47 @@ app.post('/api/analyze', async (req, res) => {
       '--out-dir', outDir
     ];
 
-    console.log(`[ANALYSIS] Running: python ${args.join(' ')}`);
-    console.log(`[ANALYSIS] Working directory: ${pyRoot}`);
+    // Determine Python command based on platform
+    let pythonCommand = 'python';
+    if (process.platform === 'darwin') { // macOS
+      pythonCommand = 'python3';
+    }
+    // Try 'python3' first, fallback to 'python'
+    const commandsToTry = process.platform === 'darwin' ? ['python3', 'python'] : ['python', 'python3'];
 
-    const py = spawn('python', args, { 
-      cwd: pyRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
-    });
+    console.log(`[ANALYSIS] Running: ${pythonCommand} ${args.join(' ')}`);
+    console.log(`[ANALYSIS] Working directory: ${pyRoot}`);
+    console.log(`[ANALYSIS] Platform: ${process.platform}`);
+
+    let py;
+    let spawnError = null;
+
+    // Try different Python commands
+    for (const cmd of commandsToTry) {
+      try {
+        py = spawn(cmd, args, { 
+          cwd: pyRoot,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        });
+        pythonCommand = cmd;
+        console.log(`[SUCCESS] Using Python command: ${cmd}`);
+        break;
+      } catch (err) {
+        spawnError = err;
+        console.log(`[WARNING] Command '${cmd}' failed: ${err.message}`);
+        continue;
+      }
+    }
+
+    if (!py) {
+      console.log(`[ERROR] All Python commands failed. Last error: ${spawnError?.message}`);
+      return sendResponse({ 
+        ok: false, 
+        error: 'Python not found. Please install Python and ensure it is in your PATH.',
+        details: `Tried commands: ${commandsToTry.join(', ')}`
+      });
+    }
 
     let stdout = '';
     let stderr = '';
@@ -128,16 +169,19 @@ app.post('/api/analyze', async (req, res) => {
     });
 
     py.on('close', (code) => {
+      if (responseSent) return;
+      
       console.log(`[PYTHON] Python process exited with code: ${code}`);
       console.log(`[PYTHON] Full STDOUT:\n${stdout}`);
       console.log(`[PYTHON] Full STDERR:\n${stderr}`);
 
       if (code !== 0) {
-        return res.status(500).json({ 
+        return sendResponse({ 
           ok: false, 
           error: 'Python analysis failed',
           details: stderr || stdout,
-          exitCode: code
+          exitCode: code,
+          pythonCommand: pythonCommand
         });
       }
 
@@ -202,21 +246,24 @@ app.post('/api/analyze', async (req, res) => {
       }
 
       console.log(`[SUCCESS] Analysis complete:`, result.data);
-      return res.json(result);
+      return sendResponse(result);
     });
 
     py.on('error', (err) => {
+      if (responseSent) return;
       console.log(`[ERROR] Python spawn error: ${err.message}`);
-      return res.status(500).json({ 
+      return sendResponse({ 
         ok: false, 
         error: 'Failed to start Python process',
-        details: err.message 
+        details: err.message,
+        pythonCommand: pythonCommand
       });
     });
 
   } catch (err) {
+    if (responseSent) return;
     console.log(`[ERROR] Server error in /api/analyze: ${err.message}`);
-    return res.status(500).json({ 
+    return sendResponse({ 
       ok: false, 
       error: 'Server error during analysis',
       details: err.message 
