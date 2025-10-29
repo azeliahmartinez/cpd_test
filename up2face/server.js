@@ -41,6 +41,14 @@ const upload = multer({
   }
 });
 
+// mount extracted frames so browser can access images
+const projectRoot = path.resolve(__dirname, '..');
+const pyRoot = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
+const extractedRoot = path.resolve(pyRoot, 'predictions', 'extracted_frames');
+
+// serve all extracted frames under /frames
+app.use('/frames', express.static(extractedRoot));
+
 // helper function to get subdirs sorted by mtime desc 
 function getLatestSubdir(rootDir) {
   if (!fs.existsSync(rootDir)) return null;
@@ -53,7 +61,6 @@ function getLatestSubdir(rootDir) {
     .sort((a, b) => b.mtime - a.mtime);
   return entries[0]?.path || null;
 }
-
 // helper function to read 'time_sec' column from a CSV file 
 function readTimesFromCsv(csvPath) {
   const out = [];
@@ -81,6 +88,19 @@ function toMinSec(sec) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+// helper function to get latest subdir by mtime
+function getLatestSubdir(rootDir) {
+  if (!fs.existsSync(rootDir)) return null;
+  const entries = fs.readdirSync(rootDir, { withFileTypes: true })
+    .filter(d => d.isDirectory())
+    .map(d => {
+      const p = path.join(rootDir, d.name);
+      return { name: d.name, path: p, mtime: fs.statSync(p).mtimeMs };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+  return entries[0] || null;
+}
+
 // upload endpoint 
 app.post('/api/upload', upload.single('video'), (req, res) => {
   const uploadDate = new Date();
@@ -94,120 +114,6 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
     url: req.file ? `/uploads/${req.file.filename}` : null,
     uploadDate: formattedDate
   });
-});
-
-// ---- NEW: Download extracted frames as ZIP ----
-app.get('/api/download-frames', (req, res) => {
-  try {
-    const videoName = req.query.video;
-    if (!videoName) {
-      return res.status(400).json({ ok: false, error: 'Video name is required' });
-    }
-
-    const projectRoot = path.resolve(__dirname, '..');
-    const pyRoot = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
-    const videoStem = path.parse(videoName).name;
-    const framesDir = path.resolve(pyRoot, 'predictions', 'extracted_frames', '5_frames', videoStem);
-
-    console.log(`[DOWNLOAD] Looking for frames in: ${framesDir}`);
-
-    if (!fs.existsSync(framesDir)) {
-      return res.status(404).json({ ok: false, error: 'No extracted frames found for this video' });
-    }
-
-    const frames = fs.readdirSync(framesDir).filter(file => 
-      file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')
-    );
-
-    if (frames.length === 0) {
-      return res.status(404).json({ ok: false, error: 'No frame images found' });
-    }
-
-    const archive = archiver('zip', {
-      zlib: { level: 9 }
-    });
-
-    res.attachment(`frames_${videoStem}.zip`);
-
-    archive.on('error', (err) => {
-      console.log(`[DOWNLOAD] Archive error: ${err}`);
-      res.status(500).json({ ok: false, error: 'Failed to create download archive' });
-    });
-
-    archive.pipe(res);
-
-    frames.forEach(frame => {
-      const framePath = path.join(framesDir, frame);
-      archive.file(framePath, { name: frame });
-    });
-
-    archive.finalize();
-
-    console.log(`[DOWNLOAD] Sent ${frames.length} frames as ZIP`);
-
-  } catch (err) {
-    console.log(`[DOWNLOAD] Error: ${err.message}`);
-    res.status(500).json({ ok: false, error: 'Download failed', details: err.message });
-  }
-});
-
-// ---- NEW: Download CSV data as ZIP ----
-app.get('/api/download-csv', (req, res) => {
-  try {
-    const videoName = req.query.video;
-    if (!videoName) {
-      return res.status(400).json({ ok: false, error: 'Video name is required' });
-    }
-
-    const projectRoot = path.resolve(__dirname, '..');
-    const pyRoot = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
-    const videoStem = path.parse(videoName).name;
-    const csvDir = path.resolve(pyRoot, 'predictions', 'raw_landmarks', '5_frames', videoStem);
-
-    console.log(`[DOWNLOAD] Looking for CSVs in: ${csvDir}`);
-
-    if (!fs.existsSync(csvDir)) {
-      return res.status(404).json({ ok: false, error: 'No CSV data found for this video' });
-    }
-
-    const csvFiles = fs.readdirSync(csvDir).filter(file => file.endsWith('.csv'));
-
-    if (csvFiles.length === 0) {
-      return res.status(404).json({ ok: false, error: 'No CSV files found' });
-    }
-
-    const archive = archiver('zip', {
-      zlib: { level: 9 }
-    });
-
-    res.attachment(`landmarks_${videoStem}.zip`);
-
-    archive.on('error', (err) => {
-      console.log(`[DOWNLOAD] Archive error: ${err}`);
-      res.status(500).json({ ok: false, error: 'Failed to create download archive' });
-    });
-
-    archive.pipe(res);
-
-    csvFiles.forEach(csvFile => {
-      const csvPath = path.join(csvDir, csvFile);
-      archive.file(csvPath, { name: csvFile });
-    });
-
-    // Add prediction summary if it exists
-    const summaryPath = path.resolve(pyRoot, 'predictions', `prediction_summary_${videoStem}.txt`);
-    if (fs.existsSync(summaryPath)) {
-      archive.file(summaryPath, { name: `prediction_summary.txt` });
-    }
-
-    archive.finalize();
-
-    console.log(`[DOWNLOAD] Sent ${csvFiles.length} CSV files as ZIP`);
-
-  } catch (err) {
-    console.log(`[DOWNLOAD] Error: ${err.message}`);
-    res.status(500).json({ ok: false, error: 'Download failed', details: err.message });
-  }
 });
 
 // analyze endpoint 
@@ -420,6 +326,179 @@ app.post('/api/analyze', async (req, res) => {
       error: 'Server error during analysis',
       details: err.message
     });
+  }
+});
+
+// download extracted frames as ZIP endpoint
+app.get('/api/download-frames', (req, res) => {
+  try {
+    const videoName = req.query.video;
+    if (!videoName) {
+      return res.status(400).json({ ok: false, error: 'Video name is required' });
+    }
+
+    const projectRoot = path.resolve(__dirname, '..');
+    const pyRoot = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
+    const videoStem = path.parse(videoName).name;
+    const framesDir = path.resolve(pyRoot, 'predictions', 'extracted_frames', '5_frames', videoStem);
+
+    console.log(`[DOWNLOAD] Looking for frames in: ${framesDir}`);
+
+    if (!fs.existsSync(framesDir)) {
+      return res.status(404).json({ ok: false, error: 'No extracted frames found for this video' });
+    }
+
+    const frames = fs.readdirSync(framesDir).filter(file => 
+      file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')
+    );
+
+    if (frames.length === 0) {
+      return res.status(404).json({ ok: false, error: 'No frame images found' });
+    }
+
+    const archive = archiver('zip', {
+      zlib: { level: 9 }
+    });
+
+    res.attachment(`frames_${videoStem}.zip`);
+
+    archive.on('error', (err) => {
+      console.log(`[DOWNLOAD] Archive error: ${err}`);
+      res.status(500).json({ ok: false, error: 'Failed to create download archive' });
+    });
+
+    archive.pipe(res);
+
+    frames.forEach(frame => {
+      const framePath = path.join(framesDir, frame);
+      archive.file(framePath, { name: frame });
+    });
+
+    archive.finalize();
+
+    console.log(`[DOWNLOAD] Sent ${frames.length} frames as ZIP`);
+
+  } catch (err) {
+    console.log(`[DOWNLOAD] Error: ${err.message}`);
+    res.status(500).json({ ok: false, error: 'Download failed', details: err.message });
+  }
+});
+
+// download CSV data as ZIP endpoint
+app.get('/api/download-csv', (req, res) => {
+  try {
+    const videoName = req.query.video;
+    if (!videoName) {
+      return res.status(400).json({ ok: false, error: 'Video name is required' });
+    }
+
+    const projectRoot = path.resolve(__dirname, '..');
+    const pyRoot = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
+    const videoStem = path.parse(videoName).name;
+    const csvDir = path.resolve(pyRoot, 'predictions', 'raw_landmarks', '5_frames', videoStem);
+
+    console.log(`[DOWNLOAD] Looking for CSVs in: ${csvDir}`);
+
+    if (!fs.existsSync(csvDir)) {
+      return res.status(404).json({ ok: false, error: 'No CSV data found for this video' });
+    }
+
+    const csvFiles = fs.readdirSync(csvDir).filter(file => file.endsWith('.csv'));
+
+    if (csvFiles.length === 0) {
+      return res.status(404).json({ ok: false, error: 'No CSV files found' });
+    }
+
+    const archive = archiver('zip', {
+      zlib: { level: 9 }
+    });
+
+    res.attachment(`landmarks_${videoStem}.zip`);
+
+    archive.on('error', (err) => {
+      console.log(`[DOWNLOAD] Archive error: ${err}`);
+      res.status(500).json({ ok: false, error: 'Failed to create download archive' });
+    });
+
+    archive.pipe(res);
+
+    csvFiles.forEach(csvFile => {
+      const csvPath = path.join(csvDir, csvFile);
+      archive.file(csvPath, { name: csvFile });
+    });
+
+    // Add prediction summary if it exists
+    const summaryPath = path.resolve(pyRoot, 'predictions', `prediction_summary_${videoStem}.txt`);
+    if (fs.existsSync(summaryPath)) {
+      archive.file(summaryPath, { name: `prediction_summary.txt` });
+    }
+
+    archive.finalize();
+
+    console.log(`[DOWNLOAD] Sent ${csvFiles.length} CSV files as ZIP`);
+
+  } catch (err) {
+    console.log(`[DOWNLOAD] Error: ${err.message}`);
+    res.status(500).json({ ok: false, error: 'Download failed', details: err.message });
+  }
+});
+
+// extracted frames endpoint
+app.post('/api/frames', (req, res) => {
+  try {
+    const savedName = (req.body && req.body.savedName) || null;
+    if (!savedName) return res.json({ ok: false, error: 'savedName is required' });
+    const nFrames = Number(req.body.nFrames || 5);
+
+    const projectRoot = path.resolve(__dirname, '..');
+    const pyRoot     = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
+    const framesRoot = path.resolve(pyRoot, 'predictions', 'extracted_frames');
+    const tierRoot   = path.resolve(framesRoot, `${nFrames}_frames`);
+
+    if (!app._framesStaticMounted) { 
+      app.use('/frames', express.static(tierRoot)); app._framesStaticMounted = true; 
+    }
+
+    const baseNoExt = path.basename(savedName, path.extname(savedName));
+
+    let runDirPath = path.join(tierRoot, baseNoExt);
+    let runDirName = baseNoExt;
+
+    if (!fs.existsSync(runDirPath)) {
+      const candidates = fs.readdirSync(tierRoot, { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .map(d => d.name);
+      const found = candidates.find(n => n.toLowerCase().includes(baseNoExt.toLowerCase()));
+      if (found) {
+        runDirName = found;
+        runDirPath = path.join(tierRoot, found);
+      }
+    }
+
+    if (!fs.existsSync(runDirPath)) {
+      const latest = getLatestSubdir(tierRoot);
+      if (!latest) return res.json({ ok: true, frames: [] });
+      runDirName = latest.name;
+      runDirPath = latest.path;
+    }
+
+    // collect images and sort by frame number if present
+    const files = fs.readdirSync(runDirPath)
+      .filter(f => /\.(png|jpg|jpeg)$/i.test(f))
+      .sort((a, b) => {
+        const na = (a.match(/(\d+)/) || [0, 0])[1];
+        const nb = (b.match(/(\d+)/) || [0, 0])[1];
+        return Number(na) - Number(nb);
+      });
+
+    const frames = files.map(f =>
+      `/frames/${nFrames}_frames/${encodeURIComponent(runDirName)}/${encodeURIComponent(f)}`
+    );
+
+    return res.json({ ok: true, frames, runFolder: runDirName });
+  } catch (err) {
+    console.log('[FRAMES] error:', err.message);
+    return res.status(500).json({ ok: false, error: 'Failed to list frames' });
   }
 });
 

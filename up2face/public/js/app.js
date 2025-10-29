@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (storedDate && dateEl)  dateEl.textContent = `Uploaded ${storedDate}`;
   if (storedTitle && titleEl) titleEl.textContent = storedTitle;
 
-  // ---------- Upload page logic ----------
+  // Upload page logic 
   if (dz && fileInput) {
     dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
@@ -113,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return { setPct, label, startIndeterminate, rampTo, stop, complete };
   })();
 
-  // ✅ Upload -> Analyze (with percentage) -> Redirect
+  // Upload -> Analyze (with percentage) -> Redirect
   if (analyzeBtn) {
     analyzeBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
@@ -190,7 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ---------- Analysis page logic ----------
+  // Analysis page logic
   const donutCanvas = document.getElementById('donutChart');
 
   const cached = safeParse(localStorage.getItem('analysisData'));
@@ -200,7 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
     runAnalyze(storedName);
   }
 
-  // NEW: Simple download functionality
+  // Download functionality
   const extractedFramesBtn = document.getElementById('extractedFramesBtn');
   if (extractedFramesBtn) {
     extractedFramesBtn.addEventListener('click', async () => {
@@ -288,7 +288,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// ---- shared analysis renderers ----
+// shared analysis renderers
 async function runAnalyze(savedName) {
   const body = { savedName, nFrames: 5 };
   const res = await fetch('/api/analyze', {
@@ -300,6 +300,34 @@ async function runAnalyze(savedName) {
   if (!res?.ok || !res.data) return;
   try { localStorage.setItem('analysisData', JSON.stringify(res.data)); } catch (_) {}
   renderAnalysis(res.data);
+}
+
+// function for loading extracted frames
+async function loadExtractedFrames() {
+  const savedName = localStorage.getItem('savedName');
+  const nFrames   = Number(localStorage.getItem('nFrames') || 5);
+
+  const res = await fetch('/api/frames', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ savedName, nFrames })
+  }).then(r => r.json()).catch(() => null);
+
+  if (!res?.ok || !res.frames) return;
+
+  const grid = document.getElementById('framesGrid');
+  if (!grid) return;
+
+  grid.innerHTML = '';
+  res.frames.forEach(src => {
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = 'Extracted Frame';
+    img.classList.add('frame-thumb');
+    grid.appendChild(img);
+    img.onerror = () => console.warn('Image failed to load:', src);
+  });
+
 }
 
 function renderAnalysis(data) {
@@ -443,6 +471,7 @@ async function loadKeyEngagementMoments() {
 if (window.location.pathname.endsWith('analysis.html')) {
   document.addEventListener('DOMContentLoaded', () => {
     loadKeyEngagementMoments();
+    loadExtractedFrames();
   });
 }
 
