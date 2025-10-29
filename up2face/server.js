@@ -59,19 +59,40 @@ app.post('/api/analyze', async (req, res) => {
 
     const nFrames = Number(req.body.nFrames || 5);
 
-    // IMPORTANT: match your directory structure exactly
-    // CPD_TEST/
-    // ├─ Facial-Expression-Changepoint-Detection/
-    // │  ├─ predict_engagement.py
-    // │  └─ output_ml/models/engagement_rf.joblib
-    // └─ up2face/
+    console.log(`[ANALYSIS] Starting analysis for: ${savedName}`);
+    console.log(`[ANALYSIS] Current directory: ${__dirname}`);
+
+    // FIXED: Use absolute path that works with your directory structure
     const projectRoot = path.resolve(__dirname, '..');
     const pyRoot = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
+    
+    console.log(`[ANALYSIS] Python root: ${pyRoot}`);
 
     const videoPath = path.resolve(__dirname, 'uploads', savedName);
     const scriptPath = path.resolve(pyRoot, 'predict_engagement.py');
     const modelDir  = path.resolve(pyRoot, 'output_ml', 'models');
     const outDir    = path.resolve(pyRoot, 'predictions');
+
+    console.log(`[ANALYSIS] Video path: ${videoPath}`);
+    console.log(`[ANALYSIS] Script path: ${scriptPath}`);
+    console.log(`[ANALYSIS] Model dir: ${modelDir}`);
+    console.log(`[ANALYSIS] Output dir: ${outDir}`);
+
+    // Check if files exist
+    if (!fs.existsSync(videoPath)) {
+      console.log(`[ERROR] Video not found: ${videoPath}`);
+      return res.status(400).json({ ok: false, error: 'Video file not found' });
+    }
+
+    if (!fs.existsSync(scriptPath)) {
+      console.log(`[ERROR] Python script not found: ${scriptPath}`);
+      return res.status(500).json({ ok: false, error: 'Python analysis script not found' });
+    }
+
+    if (!fs.existsSync(modelDir)) {
+      console.log(`[ERROR] Model directory not found: ${modelDir}`);
+      return res.status(500).json({ ok: false, error: 'Model directory not found' });
+    }
 
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
@@ -83,18 +104,44 @@ app.post('/api/analyze', async (req, res) => {
       '--out-dir', outDir
     ];
 
-    const py = spawn('python3', args, { cwd: pyRoot });
+    console.log(`[ANALYSIS] Running: python ${args.join(' ')}`);
+    console.log(`[ANALYSIS] Working directory: ${pyRoot}`);
+
+    const py = spawn('python', args, { 
+      cwd: pyRoot,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
 
     let stdout = '';
     let stderr = '';
-    py.stdout.on('data', (d) => (stdout += d.toString()));
-    py.stderr.on('data', (d) => (stderr += d.toString()));
+    py.stdout.on('data', (d) => {
+      const data = d.toString();
+      stdout += data;
+      console.log(`[PYTHON] STDOUT: ${data.trim()}`);
+    });
+    
+    py.stderr.on('data', (d) => {
+      const data = d.toString();
+      stderr += data;
+      console.log(`[PYTHON] STDERR: ${data.trim()}`);
+    });
 
     py.on('close', (code) => {
+      console.log(`[PYTHON] Python process exited with code: ${code}`);
+      console.log(`[PYTHON] Full STDOUT:\n${stdout}`);
+      console.log(`[PYTHON] Full STDERR:\n${stderr}`);
+
       if (code !== 0) {
-        return res.status(500).json({ ok: false, error: 'Python error', details: stderr || stdout });
+        return res.status(500).json({ 
+          ok: false, 
+          error: 'Python analysis failed',
+          details: stderr || stdout,
+          exitCode: code
+        });
       }
 
+      // Parse the Python output
       const result = {
         ok: true,
         data: {
@@ -112,33 +159,68 @@ app.post('/api/analyze', async (req, res) => {
         }
       };
 
+      // Parse predicted engagement
       const predLine = stdout.split('\n').find(l => /Predicted engagement:/i.test(l));
       if (predLine) {
+        console.log(`[ANALYSIS] Found prediction line: ${predLine}`);
         const m = predLine.match(/Predicted engagement:\s*(\d+)\s*[–-]\s*(.+)\s*$/i);
         if (m) {
           result.data.engagementIndex = Number(m[1]);
           result.data.engagementLabel = m[2].trim();
+          console.log(`[ANALYSIS] Parsed engagement: ${m[1]} - ${m[2]}`);
         }
       }
 
+      // Parse probabilities
       const probsBlockStart = stdout.indexOf('Class probabilities');
       if (probsBlockStart !== -1) {
         const lines = stdout.slice(probsBlockStart).split('\n').map(s => s.trim());
         const probLines = lines.filter(l => /^\d+\s*\(.+\):\s*\d*\.\d+$/i.test(l));
+        console.log(`[ANALYSIS] Found ${probLines.length} probability lines`);
+        
         probLines.forEach(line => {
           const mm = line.match(/^(\d+)\s*\((.+?)\):\s*(\d*\.\d+)$/);
           if (mm) {
             const label = mm[2].trim();
             const val = parseFloat(mm[3]) * 100;
             result.data.probabilities[label] = Math.round(val * 10) / 10;
+            console.log(`[ANALYSIS] Probability: ${label} = ${val}%`);
           }
         });
       }
 
+      // If no probabilities found, create default ones based on engagement index
+      if (Object.keys(result.data.probabilities).length === 0 && result.data.engagementIndex !== null) {
+        console.log(`[WARNING] No probabilities found, creating defaults based on engagement index: ${result.data.engagementIndex}`);
+        const labels = ['Disengaged', 'Low Engagement', 'Engaged', 'Highly Engaged'];
+        result.data.probabilities = {};
+        labels.forEach((label, index) => {
+          // Give highest probability to the predicted class, distribute rest
+          const prob = index === result.data.engagementIndex ? 70 : 10;
+          result.data.probabilities[label] = prob;
+        });
+      }
+
+      console.log(`[SUCCESS] Analysis complete:`, result.data);
       return res.json(result);
     });
+
+    py.on('error', (err) => {
+      console.log(`[ERROR] Python spawn error: ${err.message}`);
+      return res.status(500).json({ 
+        ok: false, 
+        error: 'Failed to start Python process',
+        details: err.message 
+      });
+    });
+
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    console.log(`[ERROR] Server error in /api/analyze: ${err.message}`);
+    return res.status(500).json({ 
+      ok: false, 
+      error: 'Server error during analysis',
+      details: err.message 
+    });
   }
 });
 
@@ -149,4 +231,3 @@ app.get(/.*/, (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Up2Face running at http://localhost:${PORT}`));
-

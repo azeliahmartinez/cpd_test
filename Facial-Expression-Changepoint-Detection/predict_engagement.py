@@ -1,6 +1,3 @@
-
-
-
 # predict_engagement.py
 from __future__ import annotations
 
@@ -14,6 +11,13 @@ from datetime import datetime
 import joblib
 import numpy as np
 import pandas as pd
+
+# Fix Unicode encoding for Windows
+import io
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # ---------- Your pipeline modules ----------
 from facial_expression_changepoint_detection.video_processing import VideoProcessor
@@ -52,17 +56,17 @@ def get_video_path(video_name: str) -> Path:
     video_path = base_dir / video_name
 
     if not video_path.exists():
-        print(f"❌ Video not found: {video_path}")
+        print(f"[ERROR] Video not found: {video_path}")
         raise FileNotFoundError(f"Video not found: {video_name}")
 
-    print(f"✅ Video found: {video_path}")
+    print(f"[SUCCESS] Video found: {video_path}")
     return video_path
 
 def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Path) -> Dict[str, Any]:
     """
     Extract frames, generate raw landmarks CSVs, and return all file paths
     """
-    print(f"🔄 Generating outputs for: {vid_path.name}")
+    print(f"[PROCESS] Generating outputs for: {vid_path.name}")
 
     # Create output directories
     raw_dir = out_root / "raw_landmarks" / f"{n_frames}_frames" / vid_path.stem
@@ -70,7 +74,7 @@ def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Pat
     raw_dir.mkdir(parents=True, exist_ok=True)
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"📁 Output directories created:")
+    print(f"[INFO] Output directories created:")
     print(f"   - Raw landmarks: {raw_dir}")
     print(f"   - Extracted frames: {frames_dir}")
 
@@ -82,18 +86,18 @@ def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Pat
 
     try:
         # Extract frames using changepoint detection
-        print("🎬 Extracting key frames...")
+        print("[PROCESS] Extracting key frames...")
         frames, changepoints = vp.select_frames(frame_count=n_frames)
-        print(f"✅ Extracted {len(frames)} frames at indices: {changepoints}")
+        print(f"[SUCCESS] Extracted {len(frames)} frames at indices: {changepoints}")
 
         # Save frames as images
-        print("💾 Saving frame images...")
+        print("[PROCESS] Saving frame images...")
         frame_filenames = [f"frame_{idx:04d}.png" for idx in changepoints]
         save_frames(output_dir=frames_dir, frames=frames, filenames=frame_filenames)
-        print(f"✅ Saved {len(frames)} frame images")
+        print(f"[SUCCESS] Saved {len(frames)} frame images")
 
         # Generate raw landmarks CSV files
-        print("📊 Generating landmark CSVs...")
+        print("[PROCESS] Generating landmark CSVs...")
         written_files = export_raw_landmarks_from_frames(
             video_path=vid_path,
             frames_bgr=frames,
@@ -102,7 +106,7 @@ def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Pat
             n_frames_label=n_frames,
         )
 
-        print("✅ Generated CSV files:")
+        print("[SUCCESS] Generated CSV files:")
         for file_type, file_path in written_files.items():
             print(f"   - {file_type}: {file_path.name}")
 
@@ -119,7 +123,7 @@ def ensure_raw_landmarks_and_frames(vid_path: Path, n_frames: int, out_root: Pat
         }
 
     except Exception as e:
-        print(f"❌ Error generating outputs: {e}")
+        print(f"[ERROR] Error generating outputs: {e}")
         raise
 
 def build_features_from_csvs(raw_dir: Path, n_frames: int) -> np.ndarray:
@@ -138,7 +142,7 @@ def build_features_from_csvs(raw_dir: Path, n_frames: int) -> np.ndarray:
     num_rows = max(n_face, n_pose, n_hands)
 
     print(
-        f"📊 CSVs found – Face: {'Yes' if df_face is not None else 'No'} ({n_face} rows), "
+        f"[INFO] CSVs found - Face: {'Yes' if df_face is not None else 'No'} ({n_face} rows), "
         f"Pose: {'Yes' if df_pose is not None else 'No'} ({n_pose} rows), "
         f"Hands: {'Yes' if df_hands is not None else 'No'} ({n_hands} rows)"
     )
@@ -177,11 +181,11 @@ def build_features_from_csvs(raw_dir: Path, n_frames: int) -> np.ndarray:
         rows = rows[:n_frames]
 
     feat = np.concatenate(rows, axis=0).astype(float)
-    print(f"✅ Features built: shape=({feat.size},) (per-frame={per_frame_dim}, frames={n_frames})")
+    print(f"[SUCCESS] Features built: shape=({feat.size},) (per-frame={per_frame_dim}, frames={n_frames})")
     return feat
 
 # ---------------------------------------------------------------------
-# Video → frames → CSVs → features (same as your existing pipeline)
+# Video -> frames -> CSVs -> features (same as your existing pipeline)
 # ---------------------------------------------------------------------
 def generate_outputs_from_video(vid_path: Path, out_root: Path, n_frames: int):
     """
@@ -196,27 +200,27 @@ def generate_outputs_from_video(vid_path: Path, out_root: Path, n_frames: int):
     raw_dir.mkdir(parents=True, exist_ok=True)
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    print("📁 Output directories:")
+    print("[INFO] Output directories:")
     print("   - Raw landmarks:", raw_dir)
     print("   - Extracted frames:", frames_dir)
 
     # 1) Select frames using your VideoProcessor
-    print("🎬 Extracting key frames…")
+    print("[PROCESS] Extracting key frames...")
     vp = VideoProcessor(
         vid_path=vid_path,
         signal_extractors=[LandmarksSignalExtractor(), PoseSignalExtractor(), HandSignalExtractor()],
     )
     frames_bgr, changepoints = vp.select_frames(frame_count=n_frames)
-    print(f"✅ Extracted {len(frames_bgr)} frames at indices: {changepoints}")
+    print(f"[SUCCESS] Extracted {len(frames_bgr)} frames at indices: {changepoints}")
 
     # 2) Save frames
-    print("💾 Saving frame images…")
+    print("[PROCESS] Saving frame images...")
     frame_files = [f"frame_{idx:04d}.png" for idx in changepoints]
     save_frames(output_dir=frames_dir, frames=frames_bgr, filenames=frame_files)
-    print(f"✅ Saved {len(frame_files)} frame images")
+    print(f"[SUCCESS] Saved {len(frame_files)} frame images")
 
     # 3) Export raw landmark CSVs from those frames
-    print("📊 Generating landmark CSVs…")
+    print("[PROCESS] Generating landmark CSVs...")
     written = export_raw_landmarks_from_frames(
         video_path=vid_path,
         frames_bgr=frames_bgr,
@@ -267,18 +271,18 @@ def save_summary(out_dir: Path, video_name: str, pred_label: int,
     out_dir.mkdir(parents=True, exist_ok=True)
     label_name = LABEL_NAMES.get(int(pred_label), str(pred_label))
     lines = []
-    lines.append("🎯 PREDICTION RESULTS")
-    lines.append("====================================")
+    lines.append("PREDICTION RESULTS")
+    lines.append("=" * 40)
     lines.append(f"Video: {video_name}")
-    lines.append(f"Predicted engagement: {pred_label} – {label_name}")
+    lines.append(f"Predicted engagement: {pred_label} - {label_name}")
     lines.append("")
-    lines.append("📊 Class probabilities:")
+    lines.append("Class probabilities:")
     for c, p in zip(classes, probs):
         lines.append(f"  {int(c)} ({LABEL_NAMES.get(int(c), str(c))}): {p:.3f}")
     lines.append("")
     summary_path = out_dir / f"prediction_summary_{Path(video_name).stem}.txt"
     summary_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"📝 Summary saved → {summary_path}")
+    print(f"[INFO] Summary saved -> {summary_path}")
 
 # ---------------------------------------------------------------------
 # **NEW**: Programmatic API used by the Node wrapper
@@ -286,7 +290,7 @@ def save_summary(out_dir: Path, video_name: str, pred_label: int,
 def predict_from_video(video_path: str, model_path: Optional[str] = None,
                        n_frames: int = 5, out_dir: str = "pred_output") -> Dict[str, Any]:
     """
-    Entry-point used by api_predict.py (Node → Python).
+    Entry-point used by api_predict.py (Node -> Python).
     Returns a dict compatible with the UI's RESULT_SCHEMA.
     """
     vid_path = Path(video_path).resolve()
@@ -325,7 +329,7 @@ def predict_from_video(video_path: str, model_path: Optional[str] = None,
         probs = np.zeros((len(classes),), dtype=float)
         probs[np.where(classes == pred)[0][0]] = 1.0
 
-    # Convert to 0–100 score (weighted by label intensity)
+    # Convert to 0-100 score (weighted by label intensity)
     weights = {0: 25, 1: 50, 2: 75, 3: 100}
     score = 0.0
     for c, p in zip(classes, probs):
@@ -383,14 +387,14 @@ def main():
 
     vid_path = Path(args.video).resolve()
     if not vid_path.exists():
-        print(f"❌ Video not found: {vid_path}")
+        print(f"[ERROR] Video not found: {vid_path}")
         sys.exit(1)
 
     # Load model (and optional meta) for CLI flow
     clf, meta, model_path = load_model_from_args(args.model, args.model_dir)
-    print(f"📦 Loaded model: {model_path}")
+    print(f"[MODEL] Loaded model: {model_path}")
     if meta:
-        print(f"ℹ️  Meta: {json.dumps(meta, indent=2)}")
+        print(f"[INFO] Meta: {json.dumps(meta, indent=2)}")
 
     # Generate features (and write CSVs/frames so you can inspect)
     out_root = Path(args.out_dir)
@@ -410,22 +414,21 @@ def main():
     pred_label = int(classes[np.argmax(probs)])
 
     # Print nicely
-    print("\n🎯 PREDICTION RESULTS")
-    print("====================================")
+    print("\nPREDICTION RESULTS")
+    print("=" * 40)
     print(f"Video: {vid_path.name}")
-    print(f"Predicted engagement: {pred_label} – {LABEL_NAMES.get(pred_label, 'Unknown')}")
-    print("📊 Class probabilities:")
+    print(f"Predicted engagement: {pred_label} - {LABEL_NAMES.get(pred_label, 'Unknown')}")
+    print("Class probabilities:")
     for c, p in zip(classes, probs):
         print(f"  {int(c)} ({LABEL_NAMES.get(int(c), str(c))}): {p:.3f}")
 
     # Save a summary alongside artifacts
     save_summary(out_root, vid_path.name, pred_label, probs, classes)
 
-    print("\n✅ PREDICTION COMPLETE")
-    print("Summary report generated")
-    print("Landmark CSVs generated")
-    print("Frame images extracted")
+    print("\n[SUCCESS] PREDICTION COMPLETE")
+    print("[INFO] Summary report generated")
+    print("[INFO] Landmark CSVs generated")
+    print("[INFO] Frame images extracted")
 
 if __name__ == "__main__":
     main()
-
