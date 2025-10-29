@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { spawn } = require('child_process');
+const os = require('os');
 
 const app = express();
 
@@ -29,12 +30,58 @@ const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5GB
   fileFilter: (req, file, cb) => {
-    const ok = /video\/(mp4|quicktime|x-msvideo)/.test(file.mimetype);
-    cb(ok ? null : new Error('Unsupported format'), ok);
+    const allowedExts = ['.mp4', '.mov', '.avi'];
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (allowedExts.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Unsupported format. Allowed: .mp4, .mov, .avi'), false);
+    }
   }
 });
 
-// ---- Upload endpoint ----
+// helper function to get subdirs sorted by mtime desc 
+function getLatestSubdir(rootDir) {
+  if (!fs.existsSync(rootDir)) return null;
+  const entries = fs.readdirSync(rootDir, { withFileTypes: true })
+    .filter(d => d.isDirectory())
+    .map(d => {
+      const p = path.join(rootDir, d.name);
+      return { name: d.name, path: p, mtime: fs.statSync(p).mtimeMs };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+  return entries[0]?.path || null;
+}
+
+// helper function to read 'time_sec' column from a CSV file 
+function readTimesFromCsv(csvPath) {
+  const out = [];
+  const txt = fs.readFileSync(csvPath, 'utf8').trim();
+  if (!txt) return out;
+  const lines = txt.split(/\r?\n/);
+  if (!lines.length) return out;
+
+  const header = lines[0].split(',').map(s => s.trim());
+  const tIdx = header.indexOf('time_sec');
+  if (tIdx === -1) return out;
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',');
+    const sec = parseFloat((cols[tIdx] || '').trim());
+    if (!Number.isNaN(sec)) out.push(sec);
+  }
+  return out;
+}
+
+// helper function to turn seconds to m:ss
+function toMinSec(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// upload endpoint 
 app.post('/api/upload', upload.single('video'), (req, res) => {
   const uploadDate = new Date();
   const formattedDate = uploadDate.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -49,7 +96,7 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
   });
 });
 
-// ---- Analyze endpoint (calls your Python) ----
+// analyze endpoint 
 app.post('/api/analyze', async (req, res) => {
   let responseSent = false; // Prevent double response
   const sendResponse = (data) => {
@@ -259,6 +306,58 @@ app.post('/api/analyze', async (req, res) => {
       error: 'Server error during analysis',
       details: err.message
     });
+  }
+});
+
+// key moments endpoint
+app.post('/api/key-moments', (req, res) => {
+  try {
+    const savedName = (req.body && req.body.savedName) || null;
+    if (!savedName) {
+      return res.json({ ok: false, error: 'savedName is required' });
+    }
+    const nFrames = Number(req.body.nFrames || 5);
+
+    // match /api/analyze path resolution
+    const projectRoot = path.resolve(__dirname, '..');
+    const pyRoot     = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
+    const framesRoot = path.resolve(pyRoot, 'predictions', 'raw_landmarks', `${nFrames}_frames`);
+
+    // checks folder named after the savedName 
+    const baseNoExt = path.basename(savedName, path.extname(savedName));
+    let runDir = path.join(framesRoot, baseNoExt);
+
+    // if that doesn't exist, falls back to "latest" folder under {nFrames}_frames
+    if (!fs.existsSync(runDir)) {
+      runDir = getLatestSubdir(framesRoot);
+    }
+    if (!runDir || !fs.existsSync(runDir)) {
+      return res.json({ ok: true, keyMoments: [] });
+    }
+
+    // collect time_sec from all CSVs in the folder
+    const files = fs.readdirSync(runDir).filter(f => f.toLowerCase().endsWith('.csv'));
+    let times = [];
+    for (const f of files) {
+      const csvPath = path.join(runDir, f);
+      try {
+        times.push(...readTimesFromCsv(csvPath));
+      } catch (e) {
+        // ignore a bad csv, continue
+      }
+    }
+
+    // de-dupe (by rounded second), sort asc, and format
+    const uniq = Array.from(new Set(times.map(t => t.toFixed(2))))
+      .map(s => parseFloat(s))
+      .sort((a, b) => a - b);
+
+    const keyMoments = uniq.map(s => ({ t: toMinSec(s) }));
+
+    return res.json({ ok: true, keyMoments, runDir });
+  } catch (err) {
+    console.log('[KEY-MOMENTS] error:', err.message);
+    return res.status(500).json({ ok: false, error: 'Failed to read key moments' });
   }
 });
 

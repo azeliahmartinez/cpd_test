@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (storedDate && dateEl)  dateEl.textContent = `Uploaded ${storedDate}`;
   if (storedTitle && titleEl) titleEl.textContent = storedTitle;
 
-  // ---------- Upload page logic ----------
+  // Upload page logic 
   if (dz && fileInput) {
     dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
@@ -113,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return { setPct, label, startIndeterminate, rampTo, stop, complete };
   })();
 
-  // ✅ Upload -> Analyze (with percentage) -> Redirect (Analysis renders instantly)
+  // Upload -> Analyze (with percentage) -> Redirect (Analysis renders instantly)
   if (analyzeBtn) {
     analyzeBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
@@ -190,7 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ---------- Analysis page logic ----------
+  // Analysis page logic
   const donutCanvas = document.getElementById('donutChart');
 
   const cached = safeParse(localStorage.getItem('analysisData'));
@@ -216,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// ---- shared analysis renderers ----
+// shared analysis renderers 
 async function runAnalyze(savedName) {
   const body = { savedName, nFrames: 5 };
   const res = await fetch('/api/analyze', {
@@ -237,7 +237,7 @@ function renderAnalysis(data) {
   if (titleEl) titleEl.textContent = data.title || localStorage.getItem('videoTitle') || 'Uploaded Video';
   if (dateEl)  dateEl.textContent  = data.date ? `Uploaded ${data.date}` : (localStorage.getItem('uploadDate') || '');
 
-  // --- Engagement Overview: bind exactly to backend; infer if missing; show confidence ---
+  // Engagement Overview: bind exactly to backend; infer if missing; show confidence
   const scoreEl = document.getElementById('engagementScore');
   const labelEl = document.getElementById('engagementLabel');
   const confEl  = document.getElementById('engagementConfidence');
@@ -265,7 +265,7 @@ function renderAnalysis(data) {
   if (labelEl && label) labelEl.textContent = label;
   if (confEl && typeof confidence === 'number') confEl.textContent = `• Confidence ${confidence}%`;
 
-  // --- Recommendations ---
+  // Recommendations
   const recoList = document.getElementById('recoList');
   if (recoList && Array.isArray(data.recommendations)) {
     recoList.innerHTML = '';
@@ -276,7 +276,7 @@ function renderAnalysis(data) {
     });
   }
 
-  // --- Donut + Legend from RF probabilities ---
+  // Donut + Legend from RF probabilities
   const probs = data.probabilities || {};
   drawDonut(probs);
   drawProbLegend(probs);
@@ -291,7 +291,7 @@ function drawDonut(states = {}) {
   const labels = Object.keys(states);
   const vals = Object.values(states);
   const total = vals.reduce((a, b) => a + b, 0) || 1;
-  const colors = ['#12865C', '#17A673', '#8FD6B5', '#C8E8DA'];
+  const colors = ['#E63946', '#F4A261', '#8FD6B5', '#8ECAE6'];
   let angle = -Math.PI / 2;
   const cx = c.width / 2, cy = c.height / 2, r = Math.min(cx, cy) - 20;
 
@@ -318,7 +318,7 @@ function drawProbLegend(states = {}) {
   if (!container) return;
   container.innerHTML = '';
 
-  const colors = ['#12865C', '#17A673', '#8FD6B5', '#C8E8DA'];
+  const colors = ['#E63946', '#F4A261', '#8FD6B5', '#8ECAE6'];
   const labels = Object.keys(states);
   const vals = Object.values(states);
 
@@ -344,6 +344,36 @@ function drawProbLegend(states = {}) {
     row.appendChild(swatch);
     row.appendChild(text);
     container.appendChild(row);
+  });
+}
+
+// function for loading key engagement moments (timestamps)
+async function loadKeyEngagementMoments() {
+  const savedName = localStorage.getItem('savedName');  
+  const nFrames   = Number(localStorage.getItem('nFrames') || 5);
+
+  const res = await fetch('/api/key-moments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ savedName, nFrames })
+  }).then(r => r.json());
+
+  if (!res?.ok) return;
+
+  const list = document.getElementById('momentsList');
+  if (!list) return;
+
+  list.innerHTML = '';
+  res.keyMoments.forEach(m => {
+    const li = document.createElement('li');
+    li.innerHTML = `<time>${m.t}</time> <a href="#" class="jump">Jump to Video</a>`;
+    list.appendChild(li);
+  });
+}
+
+if (window.location.pathname.endsWith('analysis.html')) {
+  document.addEventListener('DOMContentLoaded', () => {
+    loadKeyEngagementMoments();
   });
 }
 
