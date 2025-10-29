@@ -1,9 +1,9 @@
 {
   "n_frames": 5,
-  "train_samples": 357,
+  "train_samples": 544,
   "val_samples": 100,
-  "train_accuracy": 0.9971988795518207,
-  "val_accuracy": 0.52,
+  "train_accuracy": 1.0,
+  "val_accuracy": 0.4,
   "labels": {
     "0": "Disengaged",
     "1": "Low",
