@@ -113,8 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return { setPct, label, startIndeterminate, rampTo, stop, complete };
   })();
 
-
-  // ✅ Upload -> Analyze (with percentage) -> Redirect
+  // ✅ Upload -> Analyze (with percentage) -> Redirect (Analysis renders instantly)
   if (analyzeBtn) {
     analyzeBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
@@ -238,17 +237,35 @@ function renderAnalysis(data) {
   if (titleEl) titleEl.textContent = data.title || localStorage.getItem('videoTitle') || 'Uploaded Video';
   if (dateEl)  dateEl.textContent  = data.date ? `Uploaded ${data.date}` : (localStorage.getItem('uploadDate') || '');
 
-  // Engagement Overview
+  // --- Engagement Overview: bind exactly to backend; infer if missing; show confidence ---
   const scoreEl = document.getElementById('engagementScore');
   const labelEl = document.getElementById('engagementLabel');
-  if (scoreEl && typeof data.engagementIndex === 'number') {
-    scoreEl.textContent = String(data.engagementIndex);
-  }
-  if (labelEl && data.engagementLabel) {
-    labelEl.textContent = data.engagementLabel;
+  const confEl  = document.getElementById('engagementConfidence');
+
+  let idx = (typeof data.engagementIndex === 'number') ? data.engagementIndex : null;
+  let label = data.engagementLabel || null;
+
+  // derive confidence from backend or compute from probs
+  let confidence = (typeof data.confidencePercent === 'number') ? data.confidencePercent : null;
+
+  if ((!idx || !label || confidence == null) && data.probabilities && Object.keys(data.probabilities).length) {
+    const entries = Object.entries(data.probabilities).sort((a, b) => b[1] - a[1]);
+    const [topLabel, topPct] = entries[0];
+
+    // backfill
+    if (!label) label = topLabel;
+    if (idx == null) {
+      const labelToIdx = { 'Disengaged': 0, 'Low': 1, 'Engaged': 2, 'Highly Engaged': 3 };
+      idx = (labelToIdx[topLabel] !== undefined) ? labelToIdx[topLabel] : null;
+    }
+    if (confidence == null) confidence = Math.round(topPct);
   }
 
-  // Recommendations
+  if (scoreEl && idx != null) scoreEl.textContent = String(idx);
+  if (labelEl && label) labelEl.textContent = label;
+  if (confEl && typeof confidence === 'number') confEl.textContent = `• Confidence ${confidence}%`;
+
+  // --- Recommendations ---
   const recoList = document.getElementById('recoList');
   if (recoList && Array.isArray(data.recommendations)) {
     recoList.innerHTML = '';
@@ -259,7 +276,7 @@ function renderAnalysis(data) {
     });
   }
 
-  // Donut + Legend from RF probabilities
+  // --- Donut + Legend from RF probabilities ---
   const probs = data.probabilities || {};
   drawDonut(probs);
   drawProbLegend(probs);
