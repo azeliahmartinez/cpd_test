@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (storedDate && dateEl)  dateEl.textContent = `Uploaded ${storedDate}`;
   if (storedTitle && titleEl) titleEl.textContent = storedTitle;
 
-  // Upload page logic 
+  // ---------- Upload page logic ----------
   if (dz && fileInput) {
     dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
@@ -113,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return { setPct, label, startIndeterminate, rampTo, stop, complete };
   })();
 
-  // Upload -> Analyze (with percentage) -> Redirect (Analysis renders instantly)
+  // ✅ Upload -> Analyze (with percentage) -> Redirect
   if (analyzeBtn) {
     analyzeBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Phase 2: Analyze
       Progress.label('Analyzing video');
-      Progress.startIndeterminate(94, 350, 1.5); // steadily grows to ~94%
+      Progress.startIndeterminate(94, 350, 1.5);
 
       let analyzeRes;
       try {
@@ -190,33 +190,105 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Analysis page logic
+  // ---------- Analysis page logic ----------
   const donutCanvas = document.getElementById('donutChart');
 
   const cached = safeParse(localStorage.getItem('analysisData'));
   if (donutCanvas && cached) {
     renderAnalysis(cached);
   } else if (donutCanvas && storedName) {
-    // Fallback if someone loads the page directly
     runAnalyze(storedName);
   }
 
+  // NEW: Simple download functionality
   const extractedFramesBtn = document.getElementById('extractedFramesBtn');
   if (extractedFramesBtn) {
     extractedFramesBtn.addEventListener('click', async () => {
-      const saved = localStorage.getItem('savedName');
-      if (!saved) return alert('No uploaded video found.');
-      await runAnalyze(saved);
+      const videoName = localStorage.getItem('savedName');
+      if (!videoName) {
+        alert('No uploaded video found.');
+        return;
+      }
+
+      extractedFramesBtn.disabled = true;
+      extractedFramesBtn.innerHTML = '<i data-feather="download"></i> Downloading...';
+      if (window.feather) feather.replace();
+
+      try {
+        const response = await fetch(`/api/download-frames?video=${encodeURIComponent(videoName)}`);
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Download failed');
+        }
+
+        // Create download link
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `frames_${videoName.replace('.mp4', '')}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+      } catch (error) {
+        console.error('Download error:', error);
+        alert(`Download failed: ${error.message}`);
+      } finally {
+        extractedFramesBtn.disabled = false;
+        extractedFramesBtn.innerHTML = '<i data-feather="image"></i> Download Extracted Frames';
+        if (window.feather) feather.replace();
+      }
     });
   }
 
-  const downloadBtn = document.getElementById('downloadCSVBtn');
-  if (downloadBtn) {
-    downloadBtn.addEventListener('click', () => alert('Download stub. Connect to backend to enable.'));
+  const downloadCSVBtn = document.getElementById('downloadCSVBtn');
+  if (downloadCSVBtn) {
+    downloadCSVBtn.addEventListener('click', async () => {
+      const videoName = localStorage.getItem('savedName');
+      if (!videoName) {
+        alert('No uploaded video found.');
+        return;
+      }
+
+      downloadCSVBtn.disabled = true;
+      downloadCSVBtn.innerHTML = '<i data-feather="download"></i> Downloading...';
+      if (window.feather) feather.replace();
+
+      try {
+        const response = await fetch(`/api/download-csv?video=${encodeURIComponent(videoName)}`);
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Download failed');
+        }
+
+        // Create download link
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `landmarks_${videoName.replace('.mp4', '')}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+      } catch (error) {
+        console.error('Download error:', error);
+        alert(`Download failed: ${error.message}`);
+      } finally {
+        downloadCSVBtn.disabled = false;
+        downloadCSVBtn.innerHTML = '<i data-feather="download"></i> Download CSVs Data';
+        if (window.feather) feather.replace();
+      }
+    });
   }
 });
 
-// shared analysis renderers 
+// ---- shared analysis renderers ----
 async function runAnalyze(savedName) {
   const body = { savedName, nFrames: 5 };
   const res = await fetch('/api/analyze', {
@@ -237,22 +309,19 @@ function renderAnalysis(data) {
   if (titleEl) titleEl.textContent = data.title || localStorage.getItem('videoTitle') || 'Uploaded Video';
   if (dateEl)  dateEl.textContent  = data.date ? `Uploaded ${data.date}` : (localStorage.getItem('uploadDate') || '');
 
-  // Engagement Overview: bind exactly to backend; infer if missing; show confidence
+  // Engagement Overview
   const scoreEl = document.getElementById('engagementScore');
   const labelEl = document.getElementById('engagementLabel');
   const confEl  = document.getElementById('engagementConfidence');
 
   let idx = (typeof data.engagementIndex === 'number') ? data.engagementIndex : null;
   let label = data.engagementLabel || null;
-
-  // derive confidence from backend or compute from probs
   let confidence = (typeof data.confidencePercent === 'number') ? data.confidencePercent : null;
 
   if ((!idx || !label || confidence == null) && data.probabilities && Object.keys(data.probabilities).length) {
     const entries = Object.entries(data.probabilities).sort((a, b) => b[1] - a[1]);
     const [topLabel, topPct] = entries[0];
 
-    // backfill
     if (!label) label = topLabel;
     if (idx == null) {
       const labelToIdx = { 'Disengaged': 0, 'Low': 1, 'Engaged': 2, 'Highly Engaged': 3 };

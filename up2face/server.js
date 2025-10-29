@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { spawn } = require('child_process');
-const os = require('os');
+const archiver = require('archiver');
 
 const app = express();
 
@@ -28,7 +28,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5GB
+  limits: { fileSize: 5 * 1024 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedExts = ['.mp4', '.mov', '.avi'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -94,6 +94,120 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
     url: req.file ? `/uploads/${req.file.filename}` : null,
     uploadDate: formattedDate
   });
+});
+
+// ---- NEW: Download extracted frames as ZIP ----
+app.get('/api/download-frames', (req, res) => {
+  try {
+    const videoName = req.query.video;
+    if (!videoName) {
+      return res.status(400).json({ ok: false, error: 'Video name is required' });
+    }
+
+    const projectRoot = path.resolve(__dirname, '..');
+    const pyRoot = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
+    const videoStem = path.parse(videoName).name;
+    const framesDir = path.resolve(pyRoot, 'predictions', 'extracted_frames', '5_frames', videoStem);
+
+    console.log(`[DOWNLOAD] Looking for frames in: ${framesDir}`);
+
+    if (!fs.existsSync(framesDir)) {
+      return res.status(404).json({ ok: false, error: 'No extracted frames found for this video' });
+    }
+
+    const frames = fs.readdirSync(framesDir).filter(file => 
+      file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')
+    );
+
+    if (frames.length === 0) {
+      return res.status(404).json({ ok: false, error: 'No frame images found' });
+    }
+
+    const archive = archiver('zip', {
+      zlib: { level: 9 }
+    });
+
+    res.attachment(`frames_${videoStem}.zip`);
+
+    archive.on('error', (err) => {
+      console.log(`[DOWNLOAD] Archive error: ${err}`);
+      res.status(500).json({ ok: false, error: 'Failed to create download archive' });
+    });
+
+    archive.pipe(res);
+
+    frames.forEach(frame => {
+      const framePath = path.join(framesDir, frame);
+      archive.file(framePath, { name: frame });
+    });
+
+    archive.finalize();
+
+    console.log(`[DOWNLOAD] Sent ${frames.length} frames as ZIP`);
+
+  } catch (err) {
+    console.log(`[DOWNLOAD] Error: ${err.message}`);
+    res.status(500).json({ ok: false, error: 'Download failed', details: err.message });
+  }
+});
+
+// ---- NEW: Download CSV data as ZIP ----
+app.get('/api/download-csv', (req, res) => {
+  try {
+    const videoName = req.query.video;
+    if (!videoName) {
+      return res.status(400).json({ ok: false, error: 'Video name is required' });
+    }
+
+    const projectRoot = path.resolve(__dirname, '..');
+    const pyRoot = path.resolve(projectRoot, 'Facial-Expression-Changepoint-Detection');
+    const videoStem = path.parse(videoName).name;
+    const csvDir = path.resolve(pyRoot, 'predictions', 'raw_landmarks', '5_frames', videoStem);
+
+    console.log(`[DOWNLOAD] Looking for CSVs in: ${csvDir}`);
+
+    if (!fs.existsSync(csvDir)) {
+      return res.status(404).json({ ok: false, error: 'No CSV data found for this video' });
+    }
+
+    const csvFiles = fs.readdirSync(csvDir).filter(file => file.endsWith('.csv'));
+
+    if (csvFiles.length === 0) {
+      return res.status(404).json({ ok: false, error: 'No CSV files found' });
+    }
+
+    const archive = archiver('zip', {
+      zlib: { level: 9 }
+    });
+
+    res.attachment(`landmarks_${videoStem}.zip`);
+
+    archive.on('error', (err) => {
+      console.log(`[DOWNLOAD] Archive error: ${err}`);
+      res.status(500).json({ ok: false, error: 'Failed to create download archive' });
+    });
+
+    archive.pipe(res);
+
+    csvFiles.forEach(csvFile => {
+      const csvPath = path.join(csvDir, csvFile);
+      archive.file(csvPath, { name: csvFile });
+    });
+
+    // Add prediction summary if it exists
+    const summaryPath = path.resolve(pyRoot, 'predictions', `prediction_summary_${videoStem}.txt`);
+    if (fs.existsSync(summaryPath)) {
+      archive.file(summaryPath, { name: `prediction_summary.txt` });
+    }
+
+    archive.finalize();
+
+    console.log(`[DOWNLOAD] Sent ${csvFiles.length} CSV files as ZIP`);
+
+  } catch (err) {
+    console.log(`[DOWNLOAD] Error: ${err.message}`);
+    res.status(500).json({ ok: false, error: 'Download failed', details: err.message });
+  }
 });
 
 // analyze endpoint 
