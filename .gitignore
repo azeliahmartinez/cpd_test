@@ -36,3 +36,8 @@ Facial-Expression-Changepoint-Detection\output_ml\raw_landmarks\
 Facial-Expression-Changepoint-Detection\output_ml\extracted_frames\
 Facial-Expression-Changepoint-Detection\predictions\
 
+# Ignore uploaded video files from the web app
+up2face/uploads/
+*.mp4
+*.mov
+*.avi

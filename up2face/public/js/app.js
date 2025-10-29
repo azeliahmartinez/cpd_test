@@ -8,7 +8,6 @@
   }));
   if (window.feather) feather.replace();
 
-  // sidebar active state
   const path = (window.location.pathname.split('/').pop() || 'dashboard.html');
   document.querySelectorAll('.ef-sidebar a').forEach(link => {
     const href = link.getAttribute('href');
@@ -28,17 +27,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const dateEl  = document.getElementById('videoDate');
   const titleEl = document.getElementById('videoTitle');
 
-  const storedDate  = localStorage.getItem('uploadDate');
-  const storedTitle = localStorage.getItem('videoTitle');
-  
-  if (storedDate && dateEl)  {
-    dateEl.textContent  = `Uploaded ${storedDate}`;
-  }
-  
-  if (storedTitle && titleEl) {
-    titleEl.textContent = storedTitle;
-  }
-  
+  const storedDate   = localStorage.getItem('uploadDate');
+  const storedTitle  = localStorage.getItem('videoTitle');
+  const storedName   = localStorage.getItem('savedName');   // <- we’ll use this on analysis page
+
+  if (storedDate && dateEl)  dateEl.textContent = `Uploaded ${storedDate}`;
+  if (storedTitle && titleEl) titleEl.textContent = storedTitle;
+
   if (dz && fileInput) {
     dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
@@ -57,71 +52,44 @@ document.addEventListener('DOMContentLoaded', () => {
     if (analyzeBtn) analyzeBtn.disabled = false;
   }
 
+  // ---- Upload -> store savedName for analysis ----
   if (analyzeBtn) {
     analyzeBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
 
-      // progress animation 
       if (progressBar) {
         progressBar.style.width = '20%';
         setTimeout(() => progressBar.style.width = '60%', 350);
         setTimeout(() => progressBar.style.width = '100%', 800);
       }
 
-      // build multipart/form-data
       const fd = new FormData();
       fd.append('video', selectedFile);
 
-      // upload to backend
       const res = await fetch('/api/upload', { method: 'POST', body: fd }).then(r => r.json());
 
       if (res.ok) {
-        // store for analysis page
         if (res.uploadDate) localStorage.setItem('uploadDate', res.uploadDate);
         if (res.filename)   localStorage.setItem('videoTitle', res.filename);
         if (res.url)        localStorage.setItem('videoUrl', res.url);
+        if (res.savedName)  localStorage.setItem('savedName', res.savedName); // <- important
       }
 
-      // go to analysis page
       window.location.href = '/analysis.html';
     });
   }
 
-  // analysis page buttons
+  // ---- ANALYSIS PAGE: auto-run analyze and draw donut ----
+  const donutCanvas = document.getElementById('donutChart');
+  if (donutCanvas && storedName) {
+    runAnalyze(storedName);
+  }
+
   const extractedFramesBtn = document.getElementById('extractedFramesBtn');
   if (extractedFramesBtn) {
     extractedFramesBtn.addEventListener('click', async () => {
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoId: 'demo' })
-      }).then(r => r.json());
-
-      if (res?.data) {
-        document.getElementById('videoTitle').textContent = res.data.title;
-        document.getElementById('videoDuration').textContent = res.data.duration;
-        document.getElementById('videoDate').textContent = res.data.date;
-        document.getElementById('engagementScore').textContent = `${res.data.engagement}%`;
-
-        const recoList = document.getElementById('recoList');
-        recoList.innerHTML = '';
-        res.data.recommendations.forEach(t => {
-          const li = document.createElement('li');
-          li.textContent = t;
-          recoList.appendChild(li);
-        });
-
-        drawTrend(res.data.trend);
-        drawDonut(res.data.states);
-
-        const moments = document.getElementById('momentsList');
-        moments.innerHTML = '';
-        res.data.keyMoments.forEach(m => {
-          const li = document.createElement('li');
-          li.innerHTML = `<time>${m.t}</time> <a href="#" class="jump">Jump to Video</a>`;
-          moments.appendChild(li);
-        });
-      }
+      if (!storedName) return alert('No uploaded video found.');
+      await runAnalyze(storedName);
     });
   }
 
@@ -131,12 +99,60 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-function drawDonut(states = { Focused: 40, Engaged: 30, Neutral: 20, Distracted: 10 }) {
+async function runAnalyze(savedName) {
+  const body = { savedName, nFrames: 5 };
+  const res = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(r => r.json());
+
+  if (!res?.ok || !res.data) {
+    console.error(res);
+    return;
+  }
+
+  // Update headers
+  const titleEl = document.getElementById('videoTitle');
+  const dateEl  = document.getElementById('videoDate');
+  if (titleEl) titleEl.textContent = res.data.title || localStorage.getItem('videoTitle') || 'Uploaded Video';
+  if (dateEl)  dateEl.textContent  = res.data.date ? `Uploaded ${res.data.date}` : (localStorage.getItem('uploadDate') || '');
+
+  // Engagement Overview (index + label)
+  const scoreEl = document.getElementById('engagementScore');
+  const labelEl = document.getElementById('engagementLabel');
+  if (scoreEl && typeof res.data.engagementIndex === 'number') {
+    scoreEl.textContent = String(res.data.engagementIndex);
+  }
+  if (labelEl && res.data.engagementLabel) {
+    labelEl.textContent = res.data.engagementLabel;
+  }
+
+  // Recommendations
+  const recoList = document.getElementById('recoList');
+  if (recoList && Array.isArray(res.data.recommendations)) {
+    recoList.innerHTML = '';
+    res.data.recommendations.forEach(t => {
+      const li = document.createElement('li');
+      li.textContent = t;
+      recoList.appendChild(li);
+    });
+  }
+
+  // Donut + Legend from RF probabilities
+  const probs = res.data.probabilities || {};
+  drawDonut(probs);
+  drawProbLegend(probs);
+}
+
+// Donut expects an object of { label: percent, ... }
+function drawDonut(states = {}) {
   const c = document.getElementById('donutChart');
   if (!c) return;
   const ctx = c.getContext('2d');
   ctx.clearRect(0, 0, c.width, c.height);
 
+  const labels = Object.keys(states);
   const vals = Object.values(states);
   const total = vals.reduce((a, b) => a + b, 0) || 1;
   const colors = ['#12865C', '#17A673', '#8FD6B5', '#C8E8DA'];
@@ -160,3 +176,39 @@ function drawDonut(states = { Focused: 40, Engaged: 30, Neutral: 20, Distracted:
   ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
 }
+
+// Compact legend under the donut
+function drawProbLegend(states = {}) {
+  const container = document.getElementById('probLegend');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const colors = ['#12865C', '#17A673', '#8FD6B5', '#C8E8DA'];
+  const labels = Object.keys(states);
+  const vals = Object.values(states);
+
+  labels.forEach((label, i) => {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '8px';
+    row.style.marginTop = '6px';
+
+    const swatch = document.createElement('span');
+    swatch.style.display = 'inline-block';
+    swatch.style.width = '10px';
+    swatch.style.height = '10px';
+    swatch.style.borderRadius = '3px';
+    swatch.style.background = colors[i % colors.length];
+
+    const text = document.createElement('span');
+    text.className = 'muted small';
+    const pct = (Math.round((vals[i] || 0) * 10) / 10).toFixed(1);
+    text.textContent = `${label}: ${pct}%`;
+
+    row.appendChild(swatch);
+    row.appendChild(text);
+    container.appendChild(row);
+  });
+}
+

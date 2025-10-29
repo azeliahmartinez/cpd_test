@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -47,13 +48,14 @@
           <h3>Engagement Overview</h3>
           <div class="score-row">
             <div class="score" id="engagementScore">3</div>
-            <p class="muted">Highly Engaged</p>
+            <p class="muted"><span id="engagementLabel">Highly Engaged</span></p>
           </div>
         </div>
 
         <div class="card">
           <h3>Engagement Level Probabilities</h3>
           <canvas id="donutChart" width="600" height="240" aria-label="Trend"></canvas>
+          <div id="probLegend" style="margin-top:8px;"></div>
         </div>
 
         <div class="card">
@@ -72,3 +74,4 @@
   <script src="/js/app.js"></script>
 </body>
 </html>
+
