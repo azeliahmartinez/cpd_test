@@ -27,13 +27,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const dateEl  = document.getElementById('videoDate');
   const titleEl = document.getElementById('videoTitle');
 
+  // Restore known details if present
   const storedDate   = localStorage.getItem('uploadDate');
   const storedTitle  = localStorage.getItem('videoTitle');
-  const storedName   = localStorage.getItem('savedName');   // <- we’ll use this on analysis page
+  const storedName   = localStorage.getItem('savedName');
 
   if (storedDate && dateEl)  dateEl.textContent = `Uploaded ${storedDate}`;
   if (storedTitle && titleEl) titleEl.textContent = storedTitle;
 
+  // ---------- Upload page logic ----------
   if (dz && fileInput) {
     dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
@@ -52,44 +54,102 @@ document.addEventListener('DOMContentLoaded', () => {
     if (analyzeBtn) analyzeBtn.disabled = false;
   }
 
-  // ---- Upload -> store savedName for analysis ----
+  // ✅ NEW: Do upload -> THEN run /api/analyze (with nice progress + messages) -> THEN redirect
   if (analyzeBtn) {
     analyzeBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
 
-      if (progressBar) {
-        progressBar.style.width = '20%';
-        setTimeout(() => progressBar.style.width = '60%', 350);
-        setTimeout(() => progressBar.style.width = '100%', 800);
-      }
+      analyzeBtn.disabled = true;
+      animateProgress(0);
+      setStatus('Uploading video…');
 
+      // 1) Upload
       const fd = new FormData();
       fd.append('video', selectedFile);
 
-      const res = await fetch('/api/upload', { method: 'POST', body: fd }).then(r => r.json());
-
-      if (res.ok) {
-        if (res.uploadDate) localStorage.setItem('uploadDate', res.uploadDate);
-        if (res.filename)   localStorage.setItem('videoTitle', res.filename);
-        if (res.url)        localStorage.setItem('videoUrl', res.url);
-        if (res.savedName)  localStorage.setItem('savedName', res.savedName); // <- important
+      let uploadRes;
+      try {
+        uploadRes = await fetch('/api/upload', { method: 'POST', body: fd }).then(r => r.json());
+      } catch (e) {
+        setStatus('Upload failed. Please try again.');
+        analyzeBtn.disabled = false;
+        return;
       }
 
-      window.location.href = '/analysis.html';
+      if (!uploadRes?.ok) {
+        setStatus('Upload failed. Please try again.');
+        analyzeBtn.disabled = false;
+        return;
+      }
+
+      // Save basics for analysis page header
+      if (uploadRes.uploadDate) localStorage.setItem('uploadDate', uploadRes.uploadDate);
+      if (uploadRes.filename)   localStorage.setItem('videoTitle', uploadRes.filename);
+      if (uploadRes.url)        localStorage.setItem('videoUrl', uploadRes.url);
+      if (uploadRes.savedName)  localStorage.setItem('savedName', uploadRes.savedName);
+
+      animateProgress(35);
+      setStatus('Analyzing video…');
+
+      // 2) Analyze (call Python via backend)
+      let analyzeRes;
+      try {
+        // small staged progress updates while waiting
+        const progTimer = stagedProgress([55, 72, 88], [700, 1200, 1600]);
+
+        analyzeRes = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ savedName: uploadRes.savedName, nFrames: 5 })
+        }).then(r => r.json());
+
+        clearTimeouts(progTimer);
+      } catch (e) {
+        setStatus('Analysis failed. Please try again.');
+        analyzeBtn.disabled = false;
+        return;
+      }
+
+      if (!analyzeRes?.ok || !analyzeRes.data) {
+        setStatus('Analysis failed. Please try again.');
+        analyzeBtn.disabled = false;
+        return;
+      }
+
+      setStatus('Predicting engagement…');
+      animateProgress(95);
+
+      // 3) Store analysis for immediate render on analysis.html
+      try {
+        localStorage.setItem('analysisData', JSON.stringify(analyzeRes.data));
+      } catch (_) { /* ignore quota errors */ }
+
+      setStatus('Done! Opening results…');
+      animateProgress(100);
+      setTimeout(() => {
+        window.location.href = '/analysis.html';
+      }, 300);
     });
   }
 
-  // ---- ANALYSIS PAGE: auto-run analyze and draw donut ----
+  // ---------- Analysis page logic ----------
   const donutCanvas = document.getElementById('donutChart');
-  if (donutCanvas && storedName) {
+
+  // If we already have results (because we analyzed BEFORE redirect), render them immediately.
+  const cached = safeParse(localStorage.getItem('analysisData'));
+  if (donutCanvas && cached) {
+    renderAnalysis(cached);
+  } else if (donutCanvas && storedName) {
+    // Fallback: if user navigates here directly, run analyze now
     runAnalyze(storedName);
   }
 
   const extractedFramesBtn = document.getElementById('extractedFramesBtn');
   if (extractedFramesBtn) {
     extractedFramesBtn.addEventListener('click', async () => {
-      if (!storedName) return alert('No uploaded video found.');
-      await runAnalyze(storedName);
+      const saved = localStorage.getItem('savedName');
+      if (!saved) return alert('No uploaded video found.');
+      await runAnalyze(saved);
     });
   }
 
@@ -97,42 +157,68 @@ document.addEventListener('DOMContentLoaded', () => {
   if (downloadBtn) {
     downloadBtn.addEventListener('click', () => alert('Download stub. Connect to backend to enable.'));
   }
+
+  // helpers
+  function setStatus(msg) {
+    if (status) status.textContent = msg;
+  }
+
+  function animateProgress(target) {
+    const bar = document.getElementById('progressBar');
+    if (!bar) return;
+    bar.style.width = `${target}%`;
+  }
+
+  function stagedProgress(targets = [], delays = []) {
+    const tids = [];
+    targets.forEach((t, i) => {
+      const id = setTimeout(() => animateProgress(t), delays[i] || 800);
+      tids.push(id);
+    });
+    return tids;
+  }
+
+  function clearTimeouts(ids = []) {
+    ids.forEach(id => clearTimeout(id));
+  }
 });
 
+// ---- shared analysis renderers ----
 async function runAnalyze(savedName) {
   const body = { savedName, nFrames: 5 };
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
-  }).then(r => r.json());
+  }).then(r => r.json()).catch(() => null);
 
-  if (!res?.ok || !res.data) {
-    console.error(res);
-    return;
-  }
+  if (!res?.ok || !res.data) return;
+  try { localStorage.setItem('analysisData', JSON.stringify(res.data)); } catch (_) {}
+  renderAnalysis(res.data);
+}
 
+function renderAnalysis(data) {
   // Update headers
   const titleEl = document.getElementById('videoTitle');
   const dateEl  = document.getElementById('videoDate');
-  if (titleEl) titleEl.textContent = res.data.title || localStorage.getItem('videoTitle') || 'Uploaded Video';
-  if (dateEl)  dateEl.textContent  = res.data.date ? `Uploaded ${res.data.date}` : (localStorage.getItem('uploadDate') || '');
+  if (titleEl) titleEl.textContent = data.title || localStorage.getItem('videoTitle') || 'Uploaded Video';
+  if (dateEl)  dateEl.textContent  = data.date ? `Uploaded ${data.date}` : (localStorage.getItem('uploadDate') || '');
 
-  // Engagement Overview (index + label)
+  // Engagement Overview
   const scoreEl = document.getElementById('engagementScore');
   const labelEl = document.getElementById('engagementLabel');
-  if (scoreEl && typeof res.data.engagementIndex === 'number') {
-    scoreEl.textContent = String(res.data.engagementIndex);
+  if (scoreEl && typeof data.engagementIndex === 'number') {
+    scoreEl.textContent = String(data.engagementIndex);
   }
-  if (labelEl && res.data.engagementLabel) {
-    labelEl.textContent = res.data.engagementLabel;
+  if (labelEl && data.engagementLabel) {
+    labelEl.textContent = data.engagementLabel;
   }
 
   // Recommendations
   const recoList = document.getElementById('recoList');
-  if (recoList && Array.isArray(res.data.recommendations)) {
+  if (recoList && Array.isArray(data.recommendations)) {
     recoList.innerHTML = '';
-    res.data.recommendations.forEach(t => {
+    data.recommendations.forEach(t => {
       const li = document.createElement('li');
       li.textContent = t;
       recoList.appendChild(li);
@@ -140,12 +226,11 @@ async function runAnalyze(savedName) {
   }
 
   // Donut + Legend from RF probabilities
-  const probs = res.data.probabilities || {};
+  const probs = data.probabilities || {};
   drawDonut(probs);
   drawProbLegend(probs);
 }
 
-// Donut expects an object of { label: percent, ... }
 function drawDonut(states = {}) {
   const c = document.getElementById('donutChart');
   if (!c) return;
@@ -177,7 +262,6 @@ function drawDonut(states = {}) {
   ctx.globalCompositeOperation = 'source-over';
 }
 
-// Compact legend under the donut
 function drawProbLegend(states = {}) {
   const container = document.getElementById('probLegend');
   if (!container) return;
@@ -212,3 +296,6 @@ function drawProbLegend(states = {}) {
   });
 }
 
+function safeParse(s) {
+  try { return JSON.parse(s); } catch { return null; }
+}
