@@ -147,3 +147,58 @@ body{
   .hero{grid-template-columns:1fr}
   .features-grid{grid-template-columns:1fr}
 }
+
+/* ---------------------------
+   Upload Progress Aesthetic (refined)
+---------------------------- */
+.progress-area {
+  position: relative;
+  width: 90%;
+  max-width: 600px;
+  height: 22px;
+  margin: 1.2rem auto 0.5rem; /* centers + spacing */
+  border-radius: 12px;
+  background: #e8f3ee;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0%;
+  border-radius: 12px;
+  background: linear-gradient(90deg, #12865C, #17A673);
+  transition: width 0.4s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.4px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.progress-bar::after {
+  content: attr(data-pct);
+  position: relative;
+  z-index: 2;
+}
+
+.progress-bar.done {
+  background: linear-gradient(90deg, #17A673, #4ecba1);
+  box-shadow: 0 0 8px rgba(23,166,115,0.5);
+}
+
+#uploadStatus {
+  margin-top: 0.8rem;
+  font-size: 0.9rem;
+  color: #0f6b4a;
+  text-align: center;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: none;
+}

@@ -27,7 +27,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const dateEl  = document.getElementById('videoDate');
   const titleEl = document.getElementById('videoTitle');
 
-  // Restore known details if present
   const storedDate   = localStorage.getItem('uploadDate');
   const storedTitle  = localStorage.getItem('videoTitle');
   const storedName   = localStorage.getItem('savedName');
@@ -54,30 +53,92 @@ document.addEventListener('DOMContentLoaded', () => {
     if (analyzeBtn) analyzeBtn.disabled = false;
   }
 
-  // ✅ NEW: Do upload -> THEN run /api/analyze (with nice progress + messages) -> THEN redirect
+  // Progress controller with % text inside bar
+  const Progress = (() => {
+    let pct = 0;
+    let timer = null;
+    const bar = document.getElementById('progressBar');
+    const statusEl = document.getElementById('uploadStatus');
+
+    function setPct(newPct) {
+      pct = Math.max(0, Math.min(100, newPct));
+      if (bar) {
+        bar.style.width = `${pct}%`;
+        bar.setAttribute('data-pct', `${Math.round(pct)}%`);
+      }
+      if (statusEl) {
+        const label = statusEl.dataset.label || 'Processing';
+        statusEl.textContent = `${label}…`;
+      }
+    }
+
+    function label(text) {
+      if (!statusEl) return;
+      statusEl.dataset.label = text;
+      statusEl.textContent = `${text}…`;
+    }
+
+    function startIndeterminate(maxHold = 94, stepMs = 400, stepInc = 1.2) {
+      stop();
+      timer = setInterval(() => {
+        const remaining = Math.max(0, maxHold - pct);
+        const inc = Math.max(0.4, Math.min(stepInc, remaining * 0.08));
+        setPct(pct + inc);
+      }, stepMs);
+    }
+
+    function rampTo(target, durationMs = 700) {
+      const start = pct;
+      const delta = target - start;
+      const t0 = performance.now();
+      function tick(t) {
+        const p = Math.min(1, (t - t0) / durationMs);
+        const ease = 1 - Math.pow(1 - p, 3);
+        setPct(start + delta * ease);
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    function stop() {
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+
+    function complete() {
+      stop();
+      rampTo(100, 400);
+      if (bar) bar.classList.add('done');
+    }
+
+    return { setPct, label, startIndeterminate, rampTo, stop, complete };
+  })();
+
+
+  // ✅ Upload -> Analyze (with percentage) -> Redirect
   if (analyzeBtn) {
     analyzeBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
 
       analyzeBtn.disabled = true;
-      animateProgress(0);
-      setStatus('Uploading video…');
 
-      // 1) Upload
+      // Phase 1: Upload
+      Progress.label('Uploading video');
+      Progress.rampTo(15, 500);
+
       const fd = new FormData();
       fd.append('video', selectedFile);
 
       let uploadRes;
       try {
         uploadRes = await fetch('/api/upload', { method: 'POST', body: fd }).then(r => r.json());
-      } catch (e) {
-        setStatus('Upload failed. Please try again.');
+      } catch {
+        Progress.label('Upload failed');
         analyzeBtn.disabled = false;
         return;
       }
 
       if (!uploadRes?.ok) {
-        setStatus('Upload failed. Please try again.');
+        Progress.label('Upload failed');
         analyzeBtn.disabled = false;
         return;
       }
@@ -88,59 +149,56 @@ document.addEventListener('DOMContentLoaded', () => {
       if (uploadRes.url)        localStorage.setItem('videoUrl', uploadRes.url);
       if (uploadRes.savedName)  localStorage.setItem('savedName', uploadRes.savedName);
 
-      animateProgress(35);
-      setStatus('Analyzing video…');
+      Progress.rampTo(35, 500);
 
-      // 2) Analyze (call Python via backend)
+      // Phase 2: Analyze
+      Progress.label('Analyzing video');
+      Progress.startIndeterminate(94, 350, 1.5); // steadily grows to ~94%
+
       let analyzeRes;
       try {
-        // small staged progress updates while waiting
-        const progTimer = stagedProgress([55, 72, 88], [700, 1200, 1600]);
-
         analyzeRes = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ savedName: uploadRes.savedName, nFrames: 5 })
         }).then(r => r.json());
-
-        clearTimeouts(progTimer);
-      } catch (e) {
-        setStatus('Analysis failed. Please try again.');
+      } catch {
+        Progress.stop();
+        Progress.label('Analysis failed');
         analyzeBtn.disabled = false;
         return;
       }
 
       if (!analyzeRes?.ok || !analyzeRes.data) {
-        setStatus('Analysis failed. Please try again.');
+        Progress.stop();
+        Progress.label('Analysis failed');
         analyzeBtn.disabled = false;
         return;
       }
 
-      setStatus('Predicting engagement…');
-      animateProgress(95);
+      // Phase 3: Predicting / Finishing
+      Progress.label('Predicting engagement');
+      Progress.rampTo(97, 500);
+      Progress.complete();
 
-      // 3) Store analysis for immediate render on analysis.html
       try {
         localStorage.setItem('analysisData', JSON.stringify(analyzeRes.data));
-      } catch (_) { /* ignore quota errors */ }
+      } catch { /* ignore quota */ }
 
-      setStatus('Done! Opening results…');
-      animateProgress(100);
       setTimeout(() => {
         window.location.href = '/analysis.html';
-      }, 300);
+      }, 350);
     });
   }
 
   // ---------- Analysis page logic ----------
   const donutCanvas = document.getElementById('donutChart');
 
-  // If we already have results (because we analyzed BEFORE redirect), render them immediately.
   const cached = safeParse(localStorage.getItem('analysisData'));
   if (donutCanvas && cached) {
     renderAnalysis(cached);
   } else if (donutCanvas && storedName) {
-    // Fallback: if user navigates here directly, run analyze now
+    // Fallback if someone loads the page directly
     runAnalyze(storedName);
   }
 
@@ -156,30 +214,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const downloadBtn = document.getElementById('downloadCSVBtn');
   if (downloadBtn) {
     downloadBtn.addEventListener('click', () => alert('Download stub. Connect to backend to enable.'));
-  }
-
-  // helpers
-  function setStatus(msg) {
-    if (status) status.textContent = msg;
-  }
-
-  function animateProgress(target) {
-    const bar = document.getElementById('progressBar');
-    if (!bar) return;
-    bar.style.width = `${target}%`;
-  }
-
-  function stagedProgress(targets = [], delays = []) {
-    const tids = [];
-    targets.forEach((t, i) => {
-      const id = setTimeout(() => animateProgress(t), delays[i] || 800);
-      tids.push(id);
-    });
-    return tids;
-  }
-
-  function clearTimeouts(ids = []) {
-    ids.forEach(id => clearTimeout(id));
   }
 });
 

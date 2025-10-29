@@ -12,9 +12,13 @@
   <div class="ef-page">
     <div data-include="/partials/sidebar.html"></div>
     <main class="ef-content">
-      <div class="upload-card card">
+      <div class="upload-card card" style="padding-bottom: 2rem;">
         <h1>Upload Video for Engagement Analysis</h1>
-        <p class="muted">Drag & drop your lecture video or browse to select a file.</p>
+        <p class="muted">
+          Drag & drop your lecture video or browse to select a file.
+        </p>
+
+        <!-- Dropzone -->
         <div class="dropzone" id="dropzone">
           <i data-feather="cloud-upload"></i>
           <p>Drag & Drop Your Video Here</p>
@@ -25,14 +29,23 @@
           </label>
           <p class="muted small">Max 5GB • MP4, MOV, AVI</p>
         </div>
-        <button class="btn btn-primary wide" id="analyzeBtn" disabled>Analyze Video</button>
+
+        <!-- Analyze button -->
+        <button class="btn btn-primary wide" id="analyzeBtn" disabled>
+          Analyze Video
+        </button>
+
+        <!-- Progress Bar -->
         <div class="progress-area">
           <div class="progress-bar" id="progressBar"></div>
-          <p id="uploadStatus" class="muted"></p>
         </div>
+
+        <!-- Status Text -->
+        <p id="uploadStatus" class="muted"></p>
       </div>
     </main>
   </div>
+
   <div data-include="/partials/footer.html"></div>
   <script src="/js/app.js"></script>
 </body>
