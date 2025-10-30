@@ -95,9 +95,11 @@ body{
 
 /* Analysis page */
 .analysis-grid{display:grid; grid-template-columns:1.2fr .8fr; gap:16px}
-.video-card .video-placeholder{height:220px; background:#F6F8F7; border:1px solid var(--border);
-  border-radius:12px; display:flex; align-items:center; justify-content:center}
+.video-card .video-placeholder{background:#F6F8F7; border:1px solid var(--border);
+  border-radius:12px; display:flex; align-items:center; justify-content:center; overflow: hidden; position: relative}
 .video-fake i{width:56px; height:56px; color:var(--green)}
+.video-card .video-placeholder video{width: 100%; display: block; border-radius: inherit}
+.video-fake{position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%)}
 
 .frames-grid{display: grid;grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap: 10px; margin-top: 12px}
 .frames-grid .frame-thumb{width: 100%; border-radius: 8px; object-fit: cover;

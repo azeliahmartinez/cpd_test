@@ -103,24 +103,55 @@ function getLatestSubdir(rootDir) {
   return entries[0] || null;
 }
 
-// upload endpoint 
-app.post('/api/upload', upload.single('video'), (req, res) => {
-  const uploadDate = new Date();
-  const formattedDate = uploadDate.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-  return res.json({
-    ok: true,
-    message: 'Upload successful.',
-    filename: req.file?.originalname || 'video.mp4',
-    savedName: req.file?.filename,
-    url: req.file ? `/uploads/${req.file.filename}` : null,
-    uploadDate: formattedDate
+// helper function to transcode video to web mp4
+function transcodeToWebMp4(srcPath, outPath) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-y', '-i', srcPath,
+      '-c:v', 'libx264', '-profile:v', 'high', '-level', '4.1',
+      '-pix_fmt', 'yuv420p', '-preset', 'veryfast', '-crf', '23',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart',
+      outPath
+    ];
+    const ff = spawn('ffmpeg', args);
+    let err = '';
+    ff.stderr.on('data', d => err += d.toString());
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(err)));
   });
+}
+
+// upload endpoint 
+app.post('/api/upload', upload.single('video'), async (req, res) => {
+  try {
+    const uploadDate = new Date().toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    const savedName = req.file?.filename; 
+    if (!savedName) return res.json({ ok:false, error:'No file received' });
+
+    const srcPath = path.join(uploadDir, savedName);
+    const base = path.basename(savedName, path.extname(savedName));
+    const webName = `${base}_web.mp4`;
+    const outPath = path.join(uploadDir, webName);
+
+    await transcodeToWebMp4(srcPath, outPath);
+
+    return res.json({
+      ok: true,
+      message: 'Upload successful.',
+      filename: req.file.originalname,
+      savedName: webName,               
+      url: `/uploads/${webName}`,       
+      uploadDate
+    });
+  } catch (e) {
+    console.error('[UPLOAD] transcode failed:', e.message);
+    return res.status(500).json({ ok:false, error:'Transcode failed' });
+  }
 });
 
 // analyze endpoint 
 app.post('/api/analyze', async (req, res) => {
-  let responseSent = false; // Prevent double response
+  let responseSent = false;
   const sendResponse = (data) => {
     if (responseSent) return;
     responseSent = true;

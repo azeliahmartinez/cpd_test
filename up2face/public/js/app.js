@@ -302,6 +302,34 @@ async function runAnalyze(savedName) {
   renderAnalysis(res.data);
 }
 
+// function to load uploaded video
+function loadUploadedVideo() {
+  const container = document.getElementById('videoContainer');
+  if (!container) return;
+
+  const videoUrl = localStorage.getItem('videoUrl'); 
+  if (!videoUrl) {
+    container.innerHTML = '<p class="muted">No video uploaded yet. Please upload a video first.</p>';
+    return;
+  }
+
+  container.innerHTML = '';
+  const v = document.createElement('video');
+  v.src = videoUrl;           
+  v.controls = true;
+  v.preload = 'metadata';
+  v.playsInline = true;
+  v.style.width = '100%';
+  v.style.borderRadius = '8px';
+  v.style.border = '1px solid #DDE5DD';
+  v.style.background = '#000';
+
+  v.addEventListener('loadedmetadata', () => console.log('[Video] duration:', v.duration));
+  v.addEventListener('error', () => console.error('[Video] element error for', videoUrl));
+
+  container.appendChild(v);
+}
+
 // function for loading extracted frames
 async function loadExtractedFrames() {
   const savedName = localStorage.getItem('savedName');
@@ -470,8 +498,9 @@ async function loadKeyEngagementMoments() {
 
 if (window.location.pathname.endsWith('analysis.html')) {
   document.addEventListener('DOMContentLoaded', () => {
-    loadKeyEngagementMoments();
+    loadUploadedVideo();
     loadExtractedFrames();
+    loadKeyEngagementMoments();
   });
 }
 
