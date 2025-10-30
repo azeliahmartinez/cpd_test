@@ -4,6 +4,7 @@ const fs = require('fs');
 const multer = require('multer');
 const { spawn } = require('child_process');
 const archiver = require('archiver');
+const ffmpegPath = require('ffmpeg-static');
 
 const app = express();
 
@@ -114,7 +115,7 @@ function transcodeToWebMp4(srcPath, outPath) {
       '-movflags', '+faststart',
       outPath
     ];
-    const ff = spawn('ffmpeg', args);
+    const ff = spawn(ffmpegPath, args);
     let err = '';
     ff.stderr.on('data', d => err += d.toString());
     ff.on('close', code => code === 0 ? resolve() : reject(new Error(err)));
