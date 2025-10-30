@@ -7,7 +7,7 @@ const archiver = require('archiver');
 
 const app = express();
 
-// ensure uploads dir exists
+// ensure uploads directory exists
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -49,7 +49,7 @@ const extractedRoot = path.resolve(pyRoot, 'predictions', 'extracted_frames');
 // serve all extracted frames under /frames
 app.use('/frames', express.static(extractedRoot));
 
-// helper function to get subdirs sorted by mtime desc 
+// helper function to get sub directories sorted by mtime desc 
 function getLatestSubdir(rootDir) {
   if (!fs.existsSync(rootDir)) return null;
   const entries = fs.readdirSync(rootDir, { withFileTypes: true })
@@ -61,6 +61,7 @@ function getLatestSubdir(rootDir) {
     .sort((a, b) => b.mtime - a.mtime);
   return entries[0]?.path || null;
 }
+
 // helper function to read 'time_sec' column from a CSV file 
 function readTimesFromCsv(csvPath) {
   const out = [];
@@ -81,14 +82,15 @@ function readTimesFromCsv(csvPath) {
   return out;
 }
 
-// helper function to turn seconds to m:ss
-function toMinSec(sec) {
+// helper function to turn seconds to m:ss.ms
+function toMSms(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+  const ms = ((sec % 1) * 1000).toFixed(0).padStart(3, '0');
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${ms}`;
 }
 
-// helper function to get latest subdir by mtime
+// helper function to get latest sub directory by mtime
 function getLatestSubdir(rootDir) {
   if (!fs.existsSync(rootDir)) return null;
   const entries = fs.readdirSync(rootDir, { withFileTypes: true })
@@ -545,7 +547,7 @@ app.post('/api/key-moments', (req, res) => {
       .map(s => parseFloat(s))
       .sort((a, b) => a - b);
 
-    const keyMoments = uniq.map(s => ({ t: toMinSec(s) }));
+    const keyMoments = uniq.map(s => ({ t: toMSms(s) }));
 
     return res.json({ ok: true, keyMoments, runDir });
   } catch (err) {
