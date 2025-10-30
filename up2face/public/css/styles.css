@@ -19,11 +19,9 @@ body{
 }
 
 /* Header */
-.ef-header{
-  height:64px; border-bottom:1px solid var(--border);
+.ef-header{height:64px; border-bottom:1px solid var(--border);
   display:flex; align-items:center; justify-content:space-between;
-  padding:0 20px; background:#fff; position:sticky; top:0; z-index:10;
-}
+  padding:0 20px; background:#fff; position:sticky; top:0; z-index:10}
 .ef-header .brand{display:flex; align-items:center; gap:10px}
 .ef-header .app-name{font-weight:700}
 .icon{width:22px; height:22px}
@@ -31,26 +29,20 @@ body{
 
 /* Page container */
 .ef-page{display:flex;}
-.ef-sidebar{
-  width:240px; background:var(--sidebar); border-right:1px solid var(--border);
-  padding:16px; position:sticky; top:64px; height:calc(100vh - 64px);
-}
+.ef-sidebar{ width:240px; background:var(--sidebar); border-right:1px solid var(--border);
+  padding:16px; position:sticky; top:64px; height:calc(100vh - 64px)}
 .ef-sidebar .logo-row{display:flex; align-items:center; gap:10px; font-weight:700; margin-bottom:10px}
 .ef-sidebar nav{display:flex; flex-direction:column; gap:6px; margin-top:10px}
-.ef-sidebar a{
-  display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
-  color:var(--fg); text-decoration:none;
-}
+.ef-sidebar a{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
+  color:var(--fg); text-decoration:none}
 .ef-sidebar a:hover, .ef-sidebar a:focus{background:#ECF8F2}
 .ef-sidebar a.active{background:var(--green); color:#fff}
 .ef-sidebar a.active i{color:#fff}
 .ef-content{flex:1; padding:24px; max-width:1400px; margin:0 auto}
 
 /* Footer */
-.ef-footer{
-  height:56px; border-top:1px solid var(--border); display:flex; align-items:center;
-  justify-content:center; background:#fff;
-}
+.ef-footer{ height:56px; border-top:1px solid var(--border); display:flex; 
+  align-items:center; justify-content:center; background:#fff}
 
 /* Buttons */
 .btn{display:inline-flex; gap:8px; align-items:center; border:1px solid var(--green); border-radius:10px;
@@ -68,17 +60,13 @@ body{
 .small{font-size:.9rem}
 
 /* Dashboard page */
-.hero{
-  display:grid; grid-template-columns:1.2fr .8fr; gap:24px; align-items:center;
-  background:#F6FFFA; border:1px solid var(--border); border-radius:20px; padding:24px;
-}
+.hero{ display:grid; grid-template-columns:1.2fr .8fr; gap:24px; align-items:center;
+  background:#F6FFFA; border:1px solid var(--border); border-radius:20px; padding:24px;}
 .hero h1{margin:0 0 10px 0}
 .cta-row{display:flex; gap:12px; margin-top:16px}
 .hero-illu{display:flex; align-items:center; justify-content:center; font-size:72px; color:var(--green)}
 
-.features-grid{
-  display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:24px;
-}
+.features-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:24px}
 .features-grid .card i{color:var(--green)}
 
 /* Upload page */
@@ -93,6 +81,17 @@ body{
 .progress-area{margin-top:16px}
 .progress-bar{width:0;height:6px;background:var(--green);border-radius:3px;transition:width .4s ease}
 
+/* Progress Bar */
+.progress-area{position: relative; width: 90%; max-width: 600px; height: 22px; margin: 1.2rem auto 0.5rem; 
+  border-radius: 12px; background: #e8f3ee; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.06)}
+.progress-bar{position: absolute; top: 0; left: 0; height: 100%; width: 0%; border-radius: 12px;
+  background: linear-gradient(90deg, #12865C, #17A673); transition: width 0.4s ease; display: flex; align-items: center; 
+  justify-content: center; color: #fff; font-weight: 600; font-size: 0.85rem; letter-spacing: 0.4px; text-shadow: 0 1px 2px rgba(0,0,0,0.2)}
+.progress-bar::after{content: attr(data-pct); position: relative; z-index: 2}
+.progress-bar.done{background: linear-gradient(90deg, #17A673, #4ecba1); box-shadow: 0 0 8px rgba(23,166,115,0.5)}
+#uploadStatus{margin-top: 0.8rem; font-size: 0.9rem; color: #0f6b4a; text-align: center; 
+  font-weight: 500; letter-spacing: 0.3px; text-transform: none}
+
 /* Analysis page */
 .analysis-grid{display:grid; grid-template-columns:1.2fr .8fr; gap:16px}
 .video-card .video-placeholder{background:#F6F8F7; border:1px solid var(--border);
@@ -100,6 +99,8 @@ body{
 .video-fake i{width:56px; height:56px; color:var(--green)}
 .video-card .video-placeholder video{width: 100%; display: block; border-radius: inherit}
 .video-fake{position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%)}
+.timestamp-overlay{position: absolute; bottom: 10px; right: 14px; background: rgba(0,0,0,0.6); color: #fff; 
+  font-size: 13px; padding: 2px 6px; border-radius: 6px; font-family: monospace}
 
 .frames-grid{display: grid;grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap: 10px; margin-top: 12px}
 .frames-grid .frame-thumb{width: 100%; border-radius: 8px; object-fit: cover;
@@ -116,11 +117,8 @@ body{
 .moments .jump{margin-left:auto; text-decoration:none; color:var(--green)}
 
 /* About page */
-.about-hero-startup{
-  text-align:center; padding:72px 20px; border-radius:16px; margin-bottom:24px;
-  background:linear-gradient(135deg, #F0FFF7 0%, #E9FBF3 40%, #FFFFFF 100%);
-  border:1px solid var(--border);
-}
+.about-hero-startup{text-align:center; padding:72px 20px; border-radius:16px; margin-bottom:24px;
+  background:linear-gradient(135deg, #F0FFF7 0%, #E9FBF3 40%, #FFFFFF 100%); border:1px solid var(--border)}
 .about-hero-startup h1{margin:0 0 12px 0; color:var(--green); font-size:2rem}
 
 .feature-tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin:16px 0 24px}
@@ -140,7 +138,7 @@ body{
 
 /* Responsive */
 @media (max-width: 1024px){
-  .features-grid{grid-template-columns:1fr 1fr}
+.features-grid{grid-template-columns:1fr 1fr}
   .analysis-grid{grid-template-columns:1fr}
   .ef-sidebar{width:210px}
 }
@@ -148,59 +146,4 @@ body{
   .ef-sidebar{display:none}
   .hero{grid-template-columns:1fr}
   .features-grid{grid-template-columns:1fr}
-}
-
-/* ---------------------------
-   Upload Progress Aesthetic (refined)
----------------------------- */
-.progress-area {
-  position: relative;
-  width: 90%;
-  max-width: 600px;
-  height: 22px;
-  margin: 1.2rem auto 0.5rem; /* centers + spacing */
-  border-radius: 12px;
-  background: #e8f3ee;
-  overflow: hidden;
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.06);
-}
-
-.progress-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  width: 0%;
-  border-radius: 12px;
-  background: linear-gradient(90deg, #12865C, #17A673);
-  transition: width 0.4s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-weight: 600;
-  font-size: 0.85rem;
-  letter-spacing: 0.4px;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
-}
-
-.progress-bar::after {
-  content: attr(data-pct);
-  position: relative;
-  z-index: 2;
-}
-
-.progress-bar.done {
-  background: linear-gradient(90deg, #17A673, #4ecba1);
-  box-shadow: 0 0 8px rgba(23,166,115,0.5);
-}
-
-#uploadStatus {
-  margin-top: 0.8rem;
-  font-size: 0.9rem;
-  color: #0f6b4a;
-  text-align: center;
-  font-weight: 500;
-  letter-spacing: 0.3px;
-  text-transform: none;
 }

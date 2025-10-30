@@ -302,6 +302,23 @@ async function runAnalyze(savedName) {
   renderAnalysis(res.data);
 }
 
+// function to show exact timestamp in the video playback
+function attachCustomTimestamp(video) {
+  const label = document.createElement('div');
+  label.className = 'timestamp-overlay';
+  label.textContent = '00:00.000';
+  video.parentElement.style.position = 'relative';
+  video.parentElement.appendChild(label);
+
+  video.addEventListener('timeupdate', () => {
+    const sec = video.currentTime;
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    const ms = ((sec % 1) * 1000).toFixed(0).padStart(3, '0');
+    label.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${ms}`;
+  });
+}
+
 // function to load uploaded video
 function loadUploadedVideo() {
   const container = document.getElementById('videoContainer');
@@ -328,6 +345,7 @@ function loadUploadedVideo() {
   v.addEventListener('error', () => console.error('[Video] element error for', videoUrl));
 
   container.appendChild(v);
+  attachCustomTimestamp(v);
 }
 
 // function for loading extracted frames
@@ -488,11 +506,36 @@ async function loadKeyEngagementMoments() {
   const list = document.getElementById('momentsList');
   if (!list) return;
 
+  // helper function from mm:ss.mmm to seconds
+  function parseMSms(str) {
+    const [mm, rest='0'] = String(str).split(':');
+    const [ss, ms='0']  = rest.split('.');
+    return (+mm * 60) + (+ss) + (+ms / 1000);
+  }
+
+  // build the list 
   list.innerHTML = '';
   res.keyMoments.forEach(m => {
     const li = document.createElement('li');
     li.innerHTML = `<time>${m.t}</time> <a href="#" class="jump">Jump to Video</a>`;
     list.appendChild(li);
+  });
+
+  // click then jump
+  document.getElementById('momentsList')?.addEventListener('click', (e) => {
+    const a = e.target.closest('a.jump');
+    if (!a) return;
+    e.preventDefault();
+
+    const timeText = a.previousElementSibling?.textContent || '00:00.000';
+    const sec = parseMSms(timeText);
+
+    const video = document.querySelector('#videoContainer video');
+    if (!video) return;
+
+    video.currentTime = sec;
+    video.pause();
+    document.getElementById('videoContainer')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 }
 
